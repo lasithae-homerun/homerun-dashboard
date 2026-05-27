@@ -358,44 +358,28 @@ app.get('/api/app-products', async (req, res) => {
 
   try {
     const dates      = getDatesInRange(from, to);
-    const BATCH      = 50;
-    // CT SDK is CleverTap's auto-set property: 'Web' for browser events
-    const WEB_FILTER = [{ name: 'CT SDK', operator: 'equals', value: 'Web' }];
+    const BATCH = 50;
 
-    const aRows = [], wRows = [];
+    const aRows = [];
     await Promise.all(dates.map(async (dateStr) => {
       const appTotals = {};
-      const webTotals = {};
 
       for (let i = 0; i < PRODUCT_ENTRIES.length; i += BATCH) {
-        const slice = PRODUCT_ENTRIES.slice(i, i + BATCH);
-        const [appRes, webRes] = await Promise.all([
-          // App = total (no SDK filter — overwhelmingly mobile)
-          Promise.all(slice.map(({ key }) =>
-            fetchCTCount('Added to Cart', [{ name: 'title', operator: 'contains', value: key }], dateStr)
-          )),
-          Promise.all(slice.map(({ key }) =>
-            fetchCTCount('Added to Cart', [{ name: 'title', operator: 'contains', value: key }, ...WEB_FILTER], dateStr)
-          )),
-        ]);
+        const slice  = PRODUCT_ENTRIES.slice(i, i + BATCH);
+        const appRes = await Promise.all(slice.map(({ key }) =>
+          fetchCTCount('Added to Cart', [{ name: 'title', operator: 'contains', value: key }], dateStr)
+        ));
         slice.forEach(({ collection }, j) => {
           appTotals[collection] = (appTotals[collection] || 0) + (appRes[j] || 0);
-          webTotals[collection] = (webTotals[collection] || 0) + (webRes[j] || 0);
         });
       }
 
-      const toRow = (totals) => {
-        const row = { date: dateStr };
-        for (const [k, v] of Object.entries(totals)) if (v > 0) row[k] = v;
-        return row;
-      };
-      aRows.push(toRow(appTotals));
-      wRows.push(toRow(webTotals));
+      const row = { date: dateStr };
+      for (const [k, v] of Object.entries(appTotals)) if (v > 0) row[k] = v;
+      aRows.push(row);
     }));
 
-    const sort    = rows => rows.sort((a, b) => a.date.localeCompare(b.date));
-    const appRows = sort(aRows);
-    const webRows = sort(wRows);
+    const appRows = aRows.sort((a, b) => a.date.localeCompare(b.date));
 
     const totals = {};
     for (const row of appRows) {
@@ -405,8 +389,8 @@ app.get('/api/app-products', async (req, res) => {
     }
     const categories = Object.keys(totals).sort((a, b) => totals[b] - totals[a]);
 
-    appProductsCache[cacheKey] = { app: appRows, web: webRows, categories, ts: Date.now() };
-    res.json({ success: true, app: appRows, web: webRows, categories });
+    appProductsCache[cacheKey] = { app: appRows, web: [], categories, ts: Date.now() };
+    res.json({ success: true, app: appRows, web: [], categories });
   } catch (err) {
     console.error('[/api/app-products]', err.message);
     res.status(500).json({ success: false, error: err.message });
