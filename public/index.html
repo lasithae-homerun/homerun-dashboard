@@ -603,9 +603,8 @@
   function cell(period, key, d2period, isD1 = false) {
     const cls    = isD1 ? 'class="td-d1"' : '';
     const total  = period.total[key];
-    const badge  = isD1 ? delta(total, d2period.total[key]) : '';
     const valCls = isD1 ? 'val' : 'val-secondary';
-    return `<td ${cls}><span class="${valCls}">${total}</span> ${badge}${splitVal(period, key)}</td>`;
+    return `<td ${cls}><span class="${valCls}">${total}</span>${splitVal(period, key)}</td>`;
   }
 
   function renderTable(tbodyId, rows, m) {
