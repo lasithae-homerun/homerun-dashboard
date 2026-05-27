@@ -317,22 +317,23 @@ app.get('/api/conversion', async (req, res) => {
 
     for (const dateStr of dates) {
       const [
-        webSessions, productAdded, cartPage,   webOrders,
-        appLaunched, cartScreen,   appOrders,
+        webSessions, webProductAdded, cartPage,   webOrders,
+        appLaunched, appProductAdded, cartScreen, appOrders,
       ] = await Promise.all([
         fetchCTCount('Web Session Started', null, dateStr),
-        fetchCTCount('Added to Cart',       null, dateStr),
+        fetchCTCount('Added to Cart',       null, dateStr),   // web ATC event
         fetchCTCount('Page Browsed',   [{ name: 'Title',     operator: 'equals', value: 'Your Shopping Cart' }], dateStr),
         fetchCTCount('Order Created',  [{ name: 'CT Source', operator: 'equals', value: 'Web' }],               dateStr),
         fetchCTCount('App Launched',   null, dateStr),
+        fetchCTCount('Product Added',  null, dateStr),        // app ATC event
         fetchCTCount('Screen Loaded',  [{ name: 'name',      operator: 'equals', value: 'Cart' }],              dateStr),
         fetchCTCount('Order Placed',   null, dateStr),
       ]);
 
       data.push({
         date: dateStr,
-        web:  { sessions: webSessions, productAdded, cartPage,   orders: webOrders  },
-        app:  { launched: appLaunched, productAdded, cartScreen, orders: appOrders  },
+        web:  { sessions: webSessions, productAdded: webProductAdded, cartPage,   orders: webOrders  },
+        app:  { launched: appLaunched, productAdded: appProductAdded, cartScreen, orders: appOrders  },
       });
     }
 
@@ -350,7 +351,7 @@ app.get('/api/app-products', async (req, res) => {
   const { from, to } = req.query;
   if (!from || !to) return res.status(400).json({ success: false, error: 'from and to required' });
 
-  const cacheKey = `v2_${from}_${to}`;
+  const cacheKey = `v3_${from}_${to}`;
   const cached   = appProductsCache[cacheKey];
   if (cached && Date.now() - cached.ts < APP_PROD_TTL) {
     return res.json({ success: true, app: cached.app, web: cached.web, categories: cached.categories, cached: true });
@@ -360,26 +361,39 @@ app.get('/api/app-products', async (req, res) => {
     const dates      = getDatesInRange(from, to);
     const BATCH = 50;
 
-    const aRows = [];
+    const aRows = [], wRows = [];
     await Promise.all(dates.map(async (dateStr) => {
       const appTotals = {};
+      const webTotals = {};
 
       for (let i = 0; i < PRODUCT_ENTRIES.length; i += BATCH) {
-        const slice  = PRODUCT_ENTRIES.slice(i, i + BATCH);
-        const appRes = await Promise.all(slice.map(({ key }) =>
-          fetchCTCount('Added to Cart', [{ name: 'title', operator: 'contains', value: key }], dateStr)
-        ));
+        const slice = PRODUCT_ENTRIES.slice(i, i + BATCH);
+        const [appRes, webRes] = await Promise.all([
+          Promise.all(slice.map(({ key }) =>
+            fetchCTCount('Product Added',  [{ name: 'title', operator: 'contains', value: key }], dateStr)
+          )),
+          Promise.all(slice.map(({ key }) =>
+            fetchCTCount('Added to Cart',  [{ name: 'title', operator: 'contains', value: key }], dateStr)
+          )),
+        ]);
         slice.forEach(({ collection }, j) => {
           appTotals[collection] = (appTotals[collection] || 0) + (appRes[j] || 0);
+          webTotals[collection] = (webTotals[collection] || 0) + (webRes[j] || 0);
         });
       }
 
-      const row = { date: dateStr };
-      for (const [k, v] of Object.entries(appTotals)) if (v > 0) row[k] = v;
-      aRows.push(row);
+      const toRow = (totals) => {
+        const row = { date: dateStr };
+        for (const [k, v] of Object.entries(totals)) if (v > 0) row[k] = v;
+        return row;
+      };
+      aRows.push(toRow(appTotals));
+      wRows.push(toRow(webTotals));
     }));
 
-    const appRows = aRows.sort((a, b) => a.date.localeCompare(b.date));
+    const sort    = rows => rows.sort((a, b) => a.date.localeCompare(b.date));
+    const appRows = sort(aRows);
+    const webRows = sort(wRows);
 
     const totals = {};
     for (const row of appRows) {
@@ -389,8 +403,8 @@ app.get('/api/app-products', async (req, res) => {
     }
     const categories = Object.keys(totals).sort((a, b) => totals[b] - totals[a]);
 
-    appProductsCache[cacheKey] = { app: appRows, web: [], categories, ts: Date.now() };
-    res.json({ success: true, app: appRows, web: [], categories });
+    appProductsCache[cacheKey] = { app: appRows, web: webRows, categories, ts: Date.now() };
+    res.json({ success: true, app: appRows, web: webRows, categories });
   } catch (err) {
     console.error('[/api/app-products]', err.message);
     res.status(500).json({ success: false, error: err.message });
