@@ -351,7 +351,7 @@ app.get('/api/app-products', async (req, res) => {
   const { from, to } = req.query;
   if (!from || !to) return res.status(400).json({ success: false, error: 'from and to required' });
 
-  const cacheKey = `v3_${from}_${to}`;
+  const cacheKey = `v4_${from}_${to}`;
   const cached   = appProductsCache[cacheKey];
   if (cached && Date.now() - cached.ts < APP_PROD_TTL) {
     return res.json({ success: true, app: cached.app, web: cached.web, categories: cached.categories, cached: true });
@@ -370,10 +370,10 @@ app.get('/api/app-products', async (req, res) => {
         const slice = PRODUCT_ENTRIES.slice(i, i + BATCH);
         const [appRes, webRes] = await Promise.all([
           Promise.all(slice.map(({ key }) =>
-            fetchCTCount('Product Added',  [{ name: 'title', operator: 'contains', value: key }], dateStr)
+            fetchCTCount('Product Added', [{ name: 'product_name', operator: 'contains', value: key }], dateStr)
           )),
           Promise.all(slice.map(({ key }) =>
-            fetchCTCount('Added to Cart',  [{ name: 'title', operator: 'contains', value: key }], dateStr)
+            fetchCTCount('Added to Cart', [{ name: 'title',        operator: 'contains', value: key }], dateStr)
           )),
         ]);
         slice.forEach(({ collection }, j) => {
@@ -425,22 +425,38 @@ app.get('/api/env-check', (req, res) => {
 // ── ATC diagnostic: test which filter gives web data ─────────────────────────
 
 app.get('/api/debug-atc', async (req, res) => {
-  const date = req.query.date || istDate(1);
-  const filters = [
-    { label: 'no filter (total)',        props: null },
-    { label: 'CT SDK = Web',             props: [{ name: 'CT SDK',    operator: 'equals', value: 'Web'     }] },
-    { label: 'CT SDK = Android',         props: [{ name: 'CT SDK',    operator: 'equals', value: 'Android' }] },
-    { label: 'CT SDK = iOS',             props: [{ name: 'CT SDK',    operator: 'equals', value: 'iOS'     }] },
-    { label: 'CT Source = Web',          props: [{ name: 'CT Source', operator: 'equals', value: 'Web'     }] },
-    { label: 'source = web',             props: [{ name: 'source',    operator: 'equals', value: 'web'     }] },
-    { label: 'platform = web',           props: [{ name: 'platform',  operator: 'equals', value: 'web'     }] },
-    { label: 'platform = Web',           props: [{ name: 'platform',  operator: 'equals', value: 'Web'     }] },
-  ];
-  const results = {};
-  for (const { label, props } of filters) {
-    results[label] = await fetchCTCount('Added to Cart', props, date);
-  }
-  res.json({ date, results });
+  const date    = req.query.date || istDate(1);
+  const keyword = req.query.keyword || 'Cement';
+
+  const [
+    atcTotal, atcTitleContains, atcProductNameContains, atcNameContains,
+    paTotal,  paTitleContains,  paProductNameContains,  paNameContains,
+  ] = await Promise.all([
+    fetchCTCount('Added to Cart',  null, date),
+    fetchCTCount('Added to Cart',  [{ name: 'title',        operator: 'contains', value: keyword }], date),
+    fetchCTCount('Added to Cart',  [{ name: 'product_name', operator: 'contains', value: keyword }], date),
+    fetchCTCount('Added to Cart',  [{ name: 'name',         operator: 'contains', value: keyword }], date),
+    fetchCTCount('Product Added',  null, date),
+    fetchCTCount('Product Added',  [{ name: 'title',        operator: 'contains', value: keyword }], date),
+    fetchCTCount('Product Added',  [{ name: 'product_name', operator: 'contains', value: keyword }], date),
+    fetchCTCount('Product Added',  [{ name: 'name',         operator: 'contains', value: keyword }], date),
+  ]);
+
+  res.json({
+    date, keyword,
+    'Added to Cart': {
+      total: atcTotal,
+      [`title contains "${keyword}"`]:        atcTitleContains,
+      [`product_name contains "${keyword}"`]: atcProductNameContains,
+      [`name contains "${keyword}"`]:         atcNameContains,
+    },
+    'Product Added': {
+      total: paTotal,
+      [`title contains "${keyword}"`]:        paTitleContains,
+      [`product_name contains "${keyword}"`]: paProductNameContains,
+      [`name contains "${keyword}"`]:         paNameContains,
+    },
+  });
 });
 
 // ── Static + start ────────────────────────────────────────────────────────────
