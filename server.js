@@ -350,7 +350,7 @@ app.get('/api/app-products', async (req, res) => {
   const { from, to } = req.query;
   if (!from || !to) return res.status(400).json({ success: false, error: 'from and to required' });
 
-  const cacheKey = `${from}_${to}`;
+  const cacheKey = `v2_${from}_${to}`;
   const cached   = appProductsCache[cacheKey];
   if (cached && Date.now() - cached.ts < APP_PROD_TTL) {
     return res.json({ success: true, app: cached.app, web: cached.web, categories: cached.categories, cached: true });
@@ -411,6 +411,27 @@ app.get('/api/app-products', async (req, res) => {
     console.error('[/api/app-products]', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
+});
+
+// ── ATC diagnostic: test which filter gives web data ─────────────────────────
+
+app.get('/api/debug-atc', async (req, res) => {
+  const date = req.query.date || istDate(1);
+  const filters = [
+    { label: 'no filter (total)',        props: null },
+    { label: 'CT SDK = Web',             props: [{ name: 'CT SDK',    operator: 'equals', value: 'Web'     }] },
+    { label: 'CT SDK = Android',         props: [{ name: 'CT SDK',    operator: 'equals', value: 'Android' }] },
+    { label: 'CT SDK = iOS',             props: [{ name: 'CT SDK',    operator: 'equals', value: 'iOS'     }] },
+    { label: 'CT Source = Web',          props: [{ name: 'CT Source', operator: 'equals', value: 'Web'     }] },
+    { label: 'source = web',             props: [{ name: 'source',    operator: 'equals', value: 'web'     }] },
+    { label: 'platform = web',           props: [{ name: 'platform',  operator: 'equals', value: 'web'     }] },
+    { label: 'platform = Web',           props: [{ name: 'platform',  operator: 'equals', value: 'Web'     }] },
+  ];
+  const results = {};
+  for (const { label, props } of filters) {
+    results[label] = await fetchCTCount('Added to Cart', props, date);
+  }
+  res.json({ date, results });
 });
 
 // ── Static + start ────────────────────────────────────────────────────────────
