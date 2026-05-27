@@ -876,14 +876,9 @@
     return 'bad';
   }
 
-  function convCell(val, pct, isFirst) {
+  function convCell(val) {
     if (val === null) return '<td style="text-align:right">—</td>';
-    const num = `<span class="val">${val.toLocaleString()}</span>`;
-    if (isFirst) return `<td style="text-align:right">${num}</td>`;
-    const badge = pct !== null
-      ? `<div class="funnel-step ${pctClass(pct)}">↓ ${pct}%</div>`
-      : `<div class="funnel-step">—</div>`;
-    return `<td style="text-align:right">${num}${badge}</td>`;
+    return `<td style="text-align:right"><span class="val">${val.toLocaleString()}</span></td>`;
   }
 
   function cvrCell(orders, base) {
@@ -901,7 +896,7 @@
       const vals = steps.map(s => f[s.key]);
       const base = vals[0];
       const last = vals[vals.length - 1];
-      const tds  = vals.map((v, i) => convCell(v, i === 0 ? null : convPct(v, vals[i - 1]), i === 0));
+      const tds  = vals.map(v => convCell(v));
       const cvr  = cvrCell(last, base);
       return `<tr><td style="color:var(--muted);font-size:12px;font-weight:500;padding:8px 14px">${fmtDate(d.date)}</td>${tds.join('')}${cvr}</tr>`;
     }).join('');
