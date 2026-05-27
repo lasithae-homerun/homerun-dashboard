@@ -413,6 +413,17 @@ app.get('/api/app-products', async (req, res) => {
   }
 });
 
+// ── Env check ────────────────────────────────────────────────────────────────
+
+app.get('/api/env-check', (req, res) => {
+  res.json({
+    SHOPIFY_STORE_URL:    process.env.SHOPIFY_STORE_URL    ? '✓ set' : '✗ missing',
+    SHOPIFY_ACCESS_TOKEN: process.env.SHOPIFY_ACCESS_TOKEN ? '✓ set' : '✗ missing',
+    CT_ACCOUNT_ID:        process.env.CT_ACCOUNT_ID        ? '✓ set' : '✗ missing',
+    CT_PASSCODE:          process.env.CT_PASSCODE          ? '✓ set' : '✗ missing',
+  });
+});
+
 // ── ATC diagnostic: test which filter gives web data ─────────────────────────
 
 app.get('/api/debug-atc', async (req, res) => {
