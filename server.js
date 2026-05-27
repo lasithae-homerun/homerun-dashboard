@@ -359,7 +359,8 @@ app.get('/api/app-products', async (req, res) => {
   try {
     const dates      = getDatesInRange(from, to);
     const BATCH      = 50;
-    const WEB_FILTER = [{ name: 'CT Source', operator: 'equals', value: 'Web' }];
+    // CT SDK is CleverTap's auto-set property: 'Web' for browser events
+    const WEB_FILTER = [{ name: 'CT SDK', operator: 'equals', value: 'Web' }];
 
     const aRows = [], wRows = [];
     await Promise.all(dates.map(async (dateStr) => {
@@ -369,6 +370,7 @@ app.get('/api/app-products', async (req, res) => {
       for (let i = 0; i < PRODUCT_ENTRIES.length; i += BATCH) {
         const slice = PRODUCT_ENTRIES.slice(i, i + BATCH);
         const [appRes, webRes] = await Promise.all([
+          // App = total (no SDK filter — overwhelmingly mobile)
           Promise.all(slice.map(({ key }) =>
             fetchCTCount('Added to Cart', [{ name: 'title', operator: 'contains', value: key }], dateStr)
           )),
