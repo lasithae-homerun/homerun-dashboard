@@ -415,6 +415,10 @@ app.get('/api/app-products', async (req, res) => {
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-app.listen(PORT, () => {
-  console.log(`\n  ◆ HomeRun Daily Dashboard\n  → http://localhost:${PORT}\n`);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`\n  ◆ HomeRun Daily Dashboard\n  → http://localhost:${PORT}\n`);
+  });
+}
+
+module.exports = app;
