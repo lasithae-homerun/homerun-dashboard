@@ -468,7 +468,6 @@
 <div class="tabbar">
   <button class="tab-btn active" id="tab-conversion" onclick="switchTab('conversion')">Conversion</button>
   <button class="tab-btn" id="tab-atc" onclick="switchTab('atc')">Added to Cart</button>
-  <button class="tab-btn" id="tab-lifecycle" onclick="switchTab('lifecycle')">Lifecycle Segments</button>
   <button class="tab-btn" id="tab-segments" onclick="switchTab('segments')">Orders Segment</button>
 </div>
 
@@ -511,6 +510,56 @@
       </div>
     </div>
 
+    <!-- Conversion Funnel by Lifecycle Segment -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-icon icon-blue">🔁</div>
+        <div class="card-title">Conversion Funnel — Unique Users per Segment</div>
+      </div>
+      <div class="seg-wrap">
+        <table class="seg-table">
+          <thead>
+            <tr>
+              <th class="th-left" style="width:140px">User Type</th>
+              <th class="th-left" style="width:210px">Definition</th>
+              <th>App Open<i class="info-tip" onmouseenter="showTip(event,'lcAppOpen')" onmouseleave="hideTip()">i</i></th>
+              <th>Search<i class="info-tip" onmouseenter="showTip(event,'lcSearch')" onmouseleave="hideTip()">i</i></th>
+              <th>Add to Cart<i class="info-tip" onmouseenter="showTip(event,'lcAtc')" onmouseleave="hideTip()">i</i></th>
+              <th>Order Placed<i class="info-tip" onmouseenter="showTip(event,'lcOrderPlaced')" onmouseleave="hideTip()">i</i></th>
+            </tr>
+          </thead>
+          <tbody id="lcConvBody">
+            <tr><td colspan="6" class="conv-empty">Select a date range and click Load</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Basket Analysis by Lifecycle Segment -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-icon icon-orange">🛒</div>
+        <div class="card-title">Basket Analysis — per Segment</div>
+      </div>
+      <div class="seg-wrap">
+        <table class="seg-table">
+          <thead>
+            <tr>
+              <th class="th-left" style="width:140px">User Type</th>
+              <th class="th-left" style="width:210px">Definition</th>
+              <th>App Open<i class="info-tip" onmouseenter="showTip(event,'lcAppOpen')" onmouseleave="hideTip()">i</i></th>
+              <th>Unique SKUs<i class="info-tip" onmouseenter="showTip(event,'lcUniqueSkus')" onmouseleave="hideTip()">i</i></th>
+              <th>Qty / SKU<i class="info-tip" onmouseenter="showTip(event,'lcQtyPerSku')" onmouseleave="hideTip()">i</i></th>
+              <th>AOV (₹)<i class="info-tip" onmouseenter="showTip(event,'lcAov')" onmouseleave="hideTip()">i</i></th>
+            </tr>
+          </thead>
+          <tbody id="lcBasketBody">
+            <tr><td colspan="6" class="conv-empty">Select a date range and click Load</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
   </div><!-- /panel-conversion -->
 
   <!-- ── Tab: Added to Cart ── -->
@@ -547,67 +596,6 @@
 
   </div><!-- /panel-atc -->
 
-  <!-- ── Tab: Lifecycle Segments ── -->
-  <div class="tab-panel" id="panel-lifecycle">
-
-    <div class="conv-toolbar">
-      <input type="datetime-local" id="lcFrom" class="date-input">
-      <span class="conv-date-sep">to</span>
-      <input type="datetime-local" id="lcTo" class="date-input">
-      <button class="btn btn-primary btn-sm" id="lcLoadBtn" onclick="loadLifecycle()">Load</button>
-    </div>
-
-    <!-- Conversion Funnel -->
-    <div class="card">
-      <div class="card-header">
-        <div class="card-icon icon-blue">🔁</div>
-        <div class="card-title">Conversion Funnel — Unique Users per Segment</div>
-      </div>
-      <div class="seg-wrap">
-        <table class="seg-table">
-          <thead>
-            <tr>
-              <th class="th-left" style="width:140px">User Type</th>
-              <th class="th-left" style="width:210px">Definition</th>
-              <th>App Open<i class="info-tip" onmouseenter="showTip(event,'lcAppOpen')" onmouseleave="hideTip()">i</i></th>
-              <th>Search<i class="info-tip" onmouseenter="showTip(event,'lcSearch')" onmouseleave="hideTip()">i</i></th>
-              <th>Add to Cart<i class="info-tip" onmouseenter="showTip(event,'lcAtc')" onmouseleave="hideTip()">i</i></th>
-              <th>Order Placed<i class="info-tip" onmouseenter="showTip(event,'lcOrderPlaced')" onmouseleave="hideTip()">i</i></th>
-            </tr>
-          </thead>
-          <tbody id="lcConvBody">
-            <tr><td colspan="6" class="conv-empty">Select a date range and click Load</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- Basket Analysis -->
-    <div class="card">
-      <div class="card-header">
-        <div class="card-icon icon-orange">🛒</div>
-        <div class="card-title">Basket Analysis — per Segment</div>
-      </div>
-      <div class="seg-wrap">
-        <table class="seg-table">
-          <thead>
-            <tr>
-              <th class="th-left" style="width:140px">User Type</th>
-              <th class="th-left" style="width:210px">Definition</th>
-              <th>App Open<i class="info-tip" onmouseenter="showTip(event,'lcAppOpen')" onmouseleave="hideTip()">i</i></th>
-              <th>Unique SKUs<i class="info-tip" onmouseenter="showTip(event,'lcUniqueSkus')" onmouseleave="hideTip()">i</i></th>
-              <th>Qty / SKU<i class="info-tip" onmouseenter="showTip(event,'lcQtyPerSku')" onmouseleave="hideTip()">i</i></th>
-              <th>AOV (₹)<i class="info-tip" onmouseenter="showTip(event,'lcAov')" onmouseleave="hideTip()">i</i></th>
-            </tr>
-          </thead>
-          <tbody id="lcBasketBody">
-            <tr><td colspan="6" class="conv-empty">Select a date range and click Load</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-  </div><!-- /panel-lifecycle -->
 
   <!-- ── Tab: Orders Segment ── -->
   <div class="tab-panel" id="panel-segments">
@@ -715,10 +703,9 @@
     document.getElementById('tab-' + tab).classList.add('active');
     document.getElementById('panel-' + tab).classList.add('active');
     const exportBtn = document.getElementById('exportBtn');
-    if (tab === 'conversion')     exportBtn.disabled = !lastConvData;
-    else if (tab === 'atc')       exportBtn.disabled = !lastProductData;
-    else if (tab === 'lifecycle') exportBtn.disabled = !lastLifecycleData;
-    else                          exportBtn.disabled = !lastData;
+    if (tab === 'conversion') exportBtn.disabled = !lastConvData;
+    else if (tab === 'atc')   exportBtn.disabled = !lastProductData;
+    else                      exportBtn.disabled = !lastData;
   }
 
   function fmtDate(iso) {
@@ -975,7 +962,6 @@
   loadMetrics();
   initConvDates();
   initATCDates();
-  initLifecycleDates();
   loadConversion();
 
   // ── Conversion funnel ────────────────────────────────────────────────────────
@@ -1153,11 +1139,6 @@
 
   // ── Lifecycle Segments ──────────────────────────────────────────────────────
 
-  function initLifecycleDates() {
-    document.getElementById('lcFrom').value = istYMD(1) + 'T00:00';
-    document.getElementById('lcTo').value   = istYMD(1) + 'T23:59';
-  }
-
   function lcNum(v, fmt) {
     if (v === null || v === undefined) return '<span style="color:var(--border)">—</span>';
     return `<span class="val-secondary">${fmt ? fmt(v) : v.toLocaleString()}</span>`;
@@ -1176,53 +1157,6 @@
         ${metricTds}
       </tr>`;
     }).join('');
-  }
-
-  async function loadLifecycle() {
-    const from = document.getElementById('lcFrom').value;
-    const to   = document.getElementById('lcTo').value;
-    if (!from || !to) return;
-
-    const btn = document.getElementById('lcLoadBtn');
-    btn.innerHTML = '<span class="spin">⟳</span>';
-    btn.disabled  = true;
-
-    const loading = '<tr><td colspan="6" class="conv-loading"><span class="spin">⟳</span> Loading — this may take 2–3 minutes…</td></tr>';
-    document.getElementById('lcConvBody').innerHTML   = loading;
-    document.getElementById('lcBasketBody').innerHTML = loading;
-
-    try {
-      const res  = await fetch(`/api/lifecycle-segments?from=${from}&to=${to}`);
-      const json = await res.json();
-      if (!json.success) throw new Error(json.error);
-
-      lastLifecycleData = json;
-      document.getElementById('exportBtn').disabled = false;
-
-      const convMetrics = [
-        { key: 'appOpen',      label: 'App Open' },
-        { key: 'search',       label: 'Search' },
-        { key: 'atc',          label: 'Add to Cart' },
-        { key: 'orderPlaced',  label: 'Order Placed' },
-      ];
-      const basketMetrics = [
-        { key: 'appOpen',    label: 'App Open' },
-        { key: 'uniqueSkus', label: 'Unique SKUs' },
-        { key: 'avgQty',     label: 'Qty / SKU', fmt: v => v.toFixed(1) },
-        { key: 'aov',        label: 'AOV (₹)',   fmt: v => `₹${v.toLocaleString('en-IN', { minimumFractionDigits:2, maximumFractionDigits:2 })}` },
-      ];
-
-      renderLifecycleBody('lcConvBody',   json.conversion, convMetrics);
-      renderLifecycleBody('lcBasketBody', json.basket,     basketMetrics);
-
-    } catch (e) {
-      const msg = `<tr><td colspan="6" class="conv-empty" style="color:var(--red)">Error: ${e.message}</td></tr>`;
-      document.getElementById('lcConvBody').innerHTML   = msg;
-      document.getElementById('lcBasketBody').innerHTML = msg;
-    } finally {
-      btn.innerHTML = 'Load';
-      btn.disabled  = false;
-    }
   }
 
   function exportLifecycleTab() {
@@ -1266,44 +1200,69 @@
 
     document.getElementById('webConvWrapper').innerHTML = '<div class="conv-loading"><span class="spin">⟳</span> Loading…</div>';
     document.getElementById('appConvWrapper').innerHTML = '<div class="conv-loading"><span class="spin">⟳</span> Loading…</div>';
+    const lcLoading = '<tr><td colspan="6" class="conv-loading"><span class="spin">⟳</span> Loading — this may take 2–3 min…</td></tr>';
+    document.getElementById('lcConvBody').innerHTML   = lcLoading;
+    document.getElementById('lcBasketBody').innerHTML = lcLoading;
 
-    document.getElementById('appProductsWrapper').innerHTML = '<div class="conv-loading"><span class="spin">⟳</span> Loading…</div>';
-    document.getElementById('webProductsWrapper').innerHTML = '<div class="conv-loading"><span class="spin">⟳</span> Loading…</div>';
+    const webSteps = [
+      { key: 'sessions',     label: 'Web Sessions',  tip: 'webSessions'     },
+      { key: 'productAdded', label: 'Product Added',  tip: 'webProductAdded' },
+      { key: 'cartPage',     label: 'Cart Page',      tip: 'webCartPage'     },
+      { key: 'orders',       label: 'Orders (Web)',   tip: 'webOrders'       },
+    ];
+    const appSteps = [
+      { key: 'launched',     label: 'App Launched',   tip: 'appLaunched'     },
+      { key: 'productAdded', label: 'Product Added',  tip: 'appProductAdded' },
+      { key: 'cartScreen',   label: 'Cart Screen',    tip: 'appCartScreen'   },
+      { key: 'orders',       label: 'Orders (App)',   tip: 'appOrders'       },
+    ];
 
-    try {
-      const res  = await fetch(`/api/conversion?from=${from}&to=${to}`);
-      const json = await res.json();
-      if (!json.success) throw new Error(json.error);
+    // Fire both fetches in parallel — funnel tables appear fast, lifecycle renders when ready
+    const convPromise = fetch(`/api/conversion?from=${from}&to=${to}`)
+      .then(r => r.json())
+      .then(json => {
+        if (!json.success) throw new Error(json.error);
+        lastConvData = json.data;
+        document.getElementById('exportBtn').disabled = false;
+        document.getElementById('webConvWrapper').innerHTML = buildFunnelTable(json.data, 'web', webSteps);
+        document.getElementById('appConvWrapper').innerHTML = buildFunnelTable(json.data, 'app', appSteps);
+      })
+      .catch(err => {
+        const msg = `<div class="conv-empty" style="color:var(--red)">Error: ${err.message}</div>`;
+        document.getElementById('webConvWrapper').innerHTML = msg;
+        document.getElementById('appConvWrapper').innerHTML = msg;
+      });
 
-      const webSteps = [
-        { key: 'sessions',     label: 'Web Sessions',  tip: 'webSessions'     },
-        { key: 'productAdded', label: 'Product Added',  tip: 'webProductAdded' },
-        { key: 'cartPage',     label: 'Cart Page',      tip: 'webCartPage'     },
-        { key: 'orders',       label: 'Orders (Web)',   tip: 'webOrders'       },
-      ];
-      const appSteps = [
-        { key: 'launched',     label: 'App Launched',   tip: 'appLaunched'     },
-        { key: 'productAdded', label: 'Product Added',  tip: 'appProductAdded' },
-        { key: 'cartScreen',   label: 'Cart Screen',    tip: 'appCartScreen'   },
-        { key: 'orders',       label: 'Orders (App)',   tip: 'appOrders'       },
-      ];
+    const lcPromise = fetch(`/api/lifecycle-segments?from=${from}&to=${to}`)
+      .then(r => r.json())
+      .then(json => {
+        if (!json.success) throw new Error(json.error);
+        lastLifecycleData = json;
+        const convMetrics = [
+          { key: 'appOpen',     label: 'App Open' },
+          { key: 'search',      label: 'Search' },
+          { key: 'atc',         label: 'Add to Cart' },
+          { key: 'orderPlaced', label: 'Order Placed' },
+        ];
+        const basketMetrics = [
+          { key: 'appOpen',    label: 'App Open' },
+          { key: 'uniqueSkus', label: 'Unique SKUs' },
+          { key: 'avgQty',     label: 'Qty / SKU', fmt: v => v.toFixed(1) },
+          { key: 'aov',        label: 'AOV (₹)',   fmt: v => `₹${v.toLocaleString('en-IN', { minimumFractionDigits:2, maximumFractionDigits:2 })}` },
+        ];
+        renderLifecycleBody('lcConvBody',   json.conversion, convMetrics);
+        renderLifecycleBody('lcBasketBody', json.basket,     basketMetrics);
+      })
+      .catch(err => {
+        const msg = `<tr><td colspan="6" class="conv-empty" style="color:var(--red)">Error: ${err.message}</td></tr>`;
+        document.getElementById('lcConvBody').innerHTML   = msg;
+        document.getElementById('lcBasketBody').innerHTML = msg;
+      });
 
-      lastConvData = json.data;
-      document.getElementById('exportBtn').disabled = false;
-
-      document.getElementById('webConvWrapper').innerHTML = buildFunnelTable(json.data, 'web', webSteps);
-      document.getElementById('appConvWrapper').innerHTML = buildFunnelTable(json.data, 'app', appSteps);
-
-    } catch (err) {
-      const msg = `<div class="conv-empty" style="color:var(--red)">Error: ${err.message}</div>`;
-      document.getElementById('webConvWrapper').innerHTML = msg;
-      document.getElementById('appConvWrapper').innerHTML = '';
-      document.getElementById('appProductsWrapper').innerHTML = '';
-      document.getElementById('webProductsWrapper').innerHTML = '';
-    } finally {
+    Promise.allSettled([convPromise, lcPromise]).then(() => {
       btn.innerHTML = 'Load';
       btn.disabled  = false;
-    }
+    });
   }
 </script>
 
