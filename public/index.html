@@ -520,6 +520,7 @@
         <table class="seg-table">
           <thead>
             <tr>
+              <th class="th-left" style="width:60px">Channel</th>
               <th class="th-left" style="width:140px">User Type</th>
               <th class="th-left" style="width:210px">Definition</th>
               <th>App Open<i class="info-tip" onmouseenter="showTip(event,'lcAppOpen')" onmouseleave="hideTip()">i</i></th>
@@ -529,7 +530,7 @@
             </tr>
           </thead>
           <tbody id="lcConvBody">
-            <tr><td colspan="6" class="conv-empty">Select a date range and click Load</td></tr>
+            <tr><td colspan="7" class="conv-empty">Select a date range and click Load</td></tr>
           </tbody>
         </table>
       </div>
@@ -545,6 +546,7 @@
         <table class="seg-table">
           <thead>
             <tr>
+              <th class="th-left" style="width:60px">Channel</th>
               <th class="th-left" style="width:140px">User Type</th>
               <th class="th-left" style="width:210px">Definition</th>
               <th>App Open<i class="info-tip" onmouseenter="showTip(event,'lcAppOpen')" onmouseleave="hideTip()">i</i></th>
@@ -554,7 +556,7 @@
             </tr>
           </thead>
           <tbody id="lcBasketBody">
-            <tr><td colspan="6" class="conv-empty">Select a date range and click Load</td></tr>
+            <tr><td colspan="7" class="conv-empty">Select a date range and click Load</td></tr>
           </tbody>
         </table>
       </div>
@@ -684,12 +686,17 @@
   let activeTab         = 'conversion';
 
   const LC_SEGS = [
-    { key:'overall', label:'Overall',         def:'All users (no filter)',    cls:'seg-overall', tip:'lcSegOverall' },
-    { key:'new',     label:'New',             def:'OC = 0',                  cls:'',            tip:'lcSegNew'     },
-    { key:'early',   label:'Early Lifecycle', def:'OC 1–2, charged ≤60d',    cls:'',            tip:'lcSegEarly'   },
-    { key:'active',  label:'Active',          def:'OC 3–10, charged ≤60d',   cls:'',            tip:'lcSegActive'  },
-    { key:'power',   label:'Power',           def:'OC 11+, charged ≤60d',    cls:'seg-power',   tip:'lcSegPower'   },
-    { key:'churned', label:'Churned',         def:'No charge in 60d',        cls:'seg-churned', tip:'lcSegChurned' },
+    { key:'overall',     label:'Overall',         def:'All users (no filter)',     cls:'seg-overall', channel:'',    tip:'lcSegOverall' },
+    { key:'b2c_new',     label:'New',             def:'OC = 0',                   cls:'',            channel:'B2C', tip:'lcSegNew'     },
+    { key:'b2c_early',   label:'Early Lifecycle', def:'OC 1–2, charged ≤60d',     cls:'',            channel:'B2C', tip:'lcSegEarly'   },
+    { key:'b2c_active',  label:'Active',          def:'OC 3–10, charged ≤60d',    cls:'',            channel:'B2C', tip:'lcSegActive'  },
+    { key:'b2c_power',   label:'Power',           def:'OC 11+, charged ≤60d',     cls:'seg-power',   channel:'B2C', tip:'lcSegPower'   },
+    { key:'b2c_churned', label:'Churned',         def:'No charge in 60d',         cls:'seg-churned', channel:'B2C', tip:'lcSegChurned' },
+    { key:'b2b_new',     label:'New',             def:'OC = 0',                   cls:'',            channel:'B2B', tip:'lcSegNew'     },
+    { key:'b2b_early',   label:'Early Lifecycle', def:'OC 1–5, charged ≤30d',     cls:'',            channel:'B2B', tip:'lcSegEarly'   },
+    { key:'b2b_active',  label:'Active',          def:'OC 6–20, charged ≤30d',    cls:'',            channel:'B2B', tip:'lcSegActive'  },
+    { key:'b2b_power',   label:'Power',           def:'OC 21+, charged ≤30d',     cls:'seg-power',   channel:'B2B', tip:'lcSegPower'   },
+    { key:'b2b_churned', label:'Churned',         def:'No charge in 30d',         cls:'seg-churned', channel:'B2B', tip:'lcSegChurned' },
   ];
 
   function tipIcon(key) {
@@ -1146,12 +1153,27 @@
 
   function renderLifecycleBody(tbodyId, data, metrics) {
     const tbody = document.getElementById(tbodyId);
-    tbody.innerHTML = LC_SEGS.map(seg => {
+    tbody.innerHTML = LC_SEGS.map((seg, i) => {
       const rowData   = data[seg.key] || {};
       const metricTds = metrics.map(m =>
         `<td class="seg-num">${lcNum(rowData[m.key], m.fmt)}</td>`
       ).join('');
-      return `<tr class="${seg.cls}">
+
+      // Build channel cell — use rowspan for B2C/B2B groups
+      let channelTd = '';
+      const prevCh = i > 0 ? LC_SEGS[i - 1].channel : null;
+      if (!seg.channel) {
+        channelTd = `<td class="seg-channel"></td>`;
+      } else if (seg.channel !== prevCh) {
+        const span = LC_SEGS.filter(s => s.channel === seg.channel).length;
+        const cls  = seg.channel === 'B2C' ? 'seg-channel seg-channel-b2c' : 'seg-channel seg-channel-b2b';
+        channelTd  = `<td class="${cls}" rowspan="${span}">${seg.channel}</td>`;
+      }
+
+      const rowBg  = seg.channel === 'B2C' ? 'seg-b2c' : seg.channel === 'B2B' ? 'seg-b2b' : '';
+      const rowCls = [seg.cls, rowBg].filter(Boolean).join(' ');
+      return `<tr class="${rowCls}">
+        ${channelTd}
         <td class="seg-type">${seg.label}${tipIcon(seg.tip)}</td>
         <td class="seg-def">${seg.def}</td>
         ${metricTds}
@@ -1165,10 +1187,10 @@
     const wb = XLSX.utils.book_new();
 
     const makeSheet = (data, cols) => {
-      const header = ['User Type', 'Definition', ...cols.map(c => c.label)];
+      const header = ['Channel', 'User Type', 'Definition', ...cols.map(c => c.label)];
       const rows   = LC_SEGS.map(seg => {
         const d = data[seg.key] || {};
-        return [seg.label, seg.def, ...cols.map(c => d[c.key] ?? '')];
+        return [seg.channel || 'All', seg.label, seg.def, ...cols.map(c => d[c.key] ?? '')];
       });
       const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
       ws['!cols'] = [{ wch:18 }, { wch:24 }, ...cols.map(() => ({ wch:14 }))];
@@ -1200,7 +1222,7 @@
 
     document.getElementById('webConvWrapper').innerHTML = '<div class="conv-loading"><span class="spin">⟳</span> Loading…</div>';
     document.getElementById('appConvWrapper').innerHTML = '<div class="conv-loading"><span class="spin">⟳</span> Loading…</div>';
-    const lcLoading = '<tr><td colspan="6" class="conv-loading"><span class="spin">⟳</span> Loading — this may take 2–3 min…</td></tr>';
+    const lcLoading = '<tr><td colspan="7" class="conv-loading"><span class="spin">⟳</span> Loading — this may take 2–3 min…</td></tr>';
     document.getElementById('lcConvBody').innerHTML   = lcLoading;
     document.getElementById('lcBasketBody').innerHTML = lcLoading;
 
@@ -1254,7 +1276,7 @@
         renderLifecycleBody('lcBasketBody', json.basket,     basketMetrics);
       })
       .catch(err => {
-        const msg = `<tr><td colspan="6" class="conv-empty" style="color:var(--red)">Error: ${err.message}</td></tr>`;
+        const msg = `<tr><td colspan="7" class="conv-empty" style="color:var(--red)">Error: ${err.message}</td></tr>`;
         document.getElementById('lcConvBody').innerHTML   = msg;
         document.getElementById('lcBasketBody').innerHTML = msg;
       });

@@ -675,35 +675,92 @@ app.get('/api/user-segments', async (req, res) => {
 
 // ── Lifecycle Segments ─────────────────────────────────────────────────────────
 
+// B2B user IDs are pre-fetched via CT profiles export (GSTIN exists filter) because
+// the events export only embeds a subset of profileData and often omits custom properties.
+let   b2bUserIds    = new Set();
+let   b2bIdsFetchTs = 0;
+const B2B_IDS_TTL   = 6 * 60 * 60 * 1000; // refresh every 6 hours
+
+async function ensureB2BIds() {
+  if (Date.now() - b2bIdsFetchTs < B2B_IDS_TTL) return;
+  try {
+    const init = await ctRequest('POST', '/1/profiles.json', {
+      profile_filters: [{ name: 'GSTIN', operator: 'exists' }],
+    });
+    if (!init.cursor) {
+      console.warn('[B2B IDs] no cursor from profiles export, skipping');
+      b2bIdsFetchTs = Date.now();
+      return;
+    }
+    const ids = new Set();
+    let cursor = init.cursor;
+    while (cursor) {
+      const page = await ctRequest('GET', `/1/profiles.json?cursor=${cursor}`);
+      for (const p of (page.records || [])) {
+        const id = p.identity || p.objectId;
+        if (id) ids.add(String(id));
+      }
+      cursor = page.next_cursor || null;
+    }
+    b2bUserIds    = ids;
+    b2bIdsFetchTs = Date.now();
+    console.log(`[B2B IDs] fetched ${ids.size} B2B users (GSTIN exists)`);
+  } catch (e) {
+    console.error('[B2B IDs] fetch failed:', e.message);
+    b2bIdsFetchTs = Date.now(); // don't retry immediately
+  }
+}
+
 const lifecycleCache = {};
 const LIFECYCLE_TTL  = 60 * 60 * 1000;
-const LC_SEG_KEYS    = ['overall', 'new', 'early', 'active', 'power', 'churned'];
+const LC_SEG_KEYS    = [
+  'overall',
+  'b2c_new', 'b2c_early', 'b2c_active', 'b2c_power', 'b2c_churned',
+  'b2b_new', 'b2b_early', 'b2b_active', 'b2b_power', 'b2b_churned',
+];
 
-// profile can be a /1/profiles.json record OR the nested profile inside a /1/events.json record.
-// OC = profileData.orderscount (CT built-in, always prefer over event counts).
-// last_seen may be CT's 14-digit YYYYMMDDHHMMSS — normalise via ctTsToUnix before comparing.
-function classifyLifecycleSegment(profile, churnCutoffSec) {
-  if (!profile) return 'new';
-  const pd = profile.profileData || {};
-  const ev = profile.events || {};
-  // Only use the profile-level orderscount — never fall back to raw Charged event count,
-  // which can be inflated (multiple events per order) and causes over-counting in Active.
-  const oc = Number(pd.orderscount ?? pd['Orders Count'] ?? pd['orders_count'] ?? 0);
-  const lastCharged = ctTsToUnix(ev['Charged']?.last_seen || 0);
-  const isRecent    = lastCharged >= churnCutoffSec;
+// B2B detection: check pre-fetched b2bUserIds set (populated from CT profiles export with
+// GSTIN filter). Falls back to checking profileData.gstin in case the set is empty.
+// B2C recency window = 60 days; B2B = 30 days.
+// B2C thresholds: Early OC 1–2, Active OC 3–10, Power OC 11+
+// B2B thresholds: Early OC 1–5, Active OC 6–20, Power OC 21+
+function classifyLifecycleSegment(profile, b2cChurnCutoff, b2bChurnCutoff) {
+  if (!profile) return 'b2c_new';
+  const pd    = profile.profileData || {};
+  const ev    = profile.events || {};
+  const oc    = Number(pd.orderscount ?? pd['Orders Count'] ?? pd['orders_count'] ?? 0);
+  const uid      = profile.identity || profile.objectId;
+  const gstin    = pd.gstin || pd.GSTIN;
+  const hasGstin = !!(gstin && String(gstin).trim() && String(gstin).trim().toLowerCase() !== 'null');
+  const usertype = (pd.usertype || '').toLowerCase();
+  const tags     = (pd.tags || '').toLowerCase().split(',').map(t => t.trim());
+  const isB2B = (uid && b2bUserIds.size > 0 && b2bUserIds.has(String(uid))) ||
+                hasGstin ||
+                usertype.startsWith('business') ||
+                tags.includes('business');
+  const pfx   = isB2B ? 'b2b' : 'b2c';
+  const churnCutoff  = isB2B ? b2bChurnCutoff : b2cChurnCutoff;
+  const lastCharged  = ctTsToUnix(ev['Charged']?.last_seen || 0);
+  const isRecent     = lastCharged >= churnCutoff;
 
-  if (oc === 0)  return 'new';
-  if (!isRecent) return 'churned';
-  if (oc <= 2)   return 'early';   // OC 1–2
-  if (oc <= 10)  return 'active';  // OC 3–10 (matches CT: OC > 2 AND OC < 11)
-  return 'power';                   // OC 11+
+  if (oc === 0)  return `${pfx}_new`;
+  if (!isRecent) return `${pfx}_churned`;
+  if (isB2B) {
+    if (oc <= 5)  return 'b2b_early';   // OC 1–5
+    if (oc <= 20) return 'b2b_active';  // OC 6–20
+    return 'b2b_power';                  // OC 21+
+  }
+  if (oc <= 2)   return 'b2c_early';    // OC 1–2
+  if (oc <= 10)  return 'b2c_active';   // OC 3–10
+  return 'b2c_power';                    // OC 11+
 }
 
 app.get('/api/lifecycle-segments', async (req, res) => {
   const { from, to } = req.query;
   if (!from || !to) return res.status(400).json({ success: false, error: 'from and to required' });
 
-  const cacheKey = `lifecycle_v20_${from.slice(0, 10)}_${to.slice(0, 10)}`;
+  await ensureB2BIds();
+  const cacheKey = `lifecycle_v22_${from.slice(0, 10)}_${to.slice(0, 10)}`;
   const cached   = lifecycleCache[cacheKey];
   if (cached && Date.now() - cached.ts < LIFECYCLE_TTL) {
     return res.json({ success: true, conversion: cached.conversion, basket: cached.basket, cached: true });
@@ -711,9 +768,10 @@ app.get('/api/lifecycle-segments', async (req, res) => {
 
   const fromD = parseInt(from.slice(0, 10).replace(/-/g, ''), 10);
   const toD   = parseInt(to.slice(0, 10).replace(/-/g, ''), 10);
-  // Use today (IST) as the recency anchor to match CT's "last 60 days" definition,
-  // which is always relative to the current day regardless of selected date range.
-  const churnCutoff = istToUnix(istDate(0)) - 60 * 24 * 60 * 60;
+  // Recency anchored to today (IST) to match CT's live "last N days" definition.
+  const todayUnix    = istToUnix(istDate(0));
+  const b2cChurnCutoff = todayUnix - 60 * 24 * 60 * 60;
+  const b2bChurnCutoff = todayUnix - 30 * 24 * 60 * 60;
 
   try {
     // CT silently returns 0 records when too many export sessions run concurrently.
@@ -757,7 +815,7 @@ app.get('/api/lifecycle-segments', async (req, res) => {
 
     const countConv = (profiles, metric) => {
       for (const p of profiles) {
-        const s = classifyLifecycleSegment(p, churnCutoff);
+        const s = classifyLifecycleSegment(p, b2cChurnCutoff, b2bChurnCutoff);
         conv.overall[metric]++;
         conv[s][metric]++;
       }
@@ -773,13 +831,13 @@ app.get('/api/lifecycle-segments', async (req, res) => {
     const bkt   = Object.fromEntries(LC_SEG_KEYS.map(s => [s, mkBkt()]));
 
     for (const p of appProfiles) {
-      const s = classifyLifecycleSegment(p, churnCutoff);
+      const s = classifyLifecycleSegment(p, b2cChurnCutoff, b2bChurnCutoff);
       bkt.overall.appOpen++;
       bkt[s].appOpen++;
     }
 
     for (const ev of atcEvents) {
-      const s   = classifyLifecycleSegment(ev.profile, churnCutoff);
+      const s   = classifyLifecycleSegment(ev.profile, b2cChurnCutoff, b2bChurnCutoff);
       const sku = ev.event_props?.variant_id || ev.event_props?.sku || ev.event_props?.product_name;
       const qty = parseFloat(ev.event_props?.quantity) || 1;
       if (sku) { bkt.overall.skuSet.add(String(sku)); if (bkt[s]) bkt[s].skuSet.add(String(sku)); }
@@ -788,7 +846,7 @@ app.get('/api/lifecycle-segments', async (req, res) => {
     }
 
     for (const ev of chargedEvents) {
-      const s   = classifyLifecycleSegment(ev.profile, churnCutoff);
+      const s   = classifyLifecycleSegment(ev.profile, b2cChurnCutoff, b2bChurnCutoff);
       const amt = parseFloat(ev.event_props?.Amount || ev.event_props?.amount || 0);
       if (amt > 0) {
         bkt.overall.aovSum += amt; bkt.overall.aovCount++;
@@ -1016,7 +1074,10 @@ app.get('/api/debug-atc', async (req, res) => {
 app.get('/api/debug-lc-profiles', async (req, res) => {
   const date = (req.query.date || istDate(1)).slice(0, 10);
   const d    = parseInt(date.replace(/-/g, ''), 10);
-  const churnCutoff = istToUnix(date) - 60 * 24 * 60 * 60;
+  const todayUnix    = istToUnix(istDate(0));
+  const b2cChurnCutoff = todayUnix - 60 * 24 * 60 * 60;
+  const b2bChurnCutoff = todayUnix - 30 * 24 * 60 * 60;
+  const churnCutoff = b2cChurnCutoff;
   try {
     const profiles = await exportCTProfiles('Screen Loaded', d, d, [{ name: 'name', operator: 'equals', value: 'Search' }]);
     const sample = profiles.slice(0, 15).map(p => {
@@ -1037,7 +1098,7 @@ app.get('/api/debug-lc-profiles', async (req, res) => {
         churnCutoff,
         isRecent:           lastSeen >= churnCutoff,
         oc_used:            oc,
-        segment:            classifyLifecycleSegment(p, churnCutoff),
+        segment:            classifyLifecycleSegment(p, b2cChurnCutoff, b2bChurnCutoff),
         profileData_keys:   Object.keys(pd).slice(0, 30),
       };
     });
