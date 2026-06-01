@@ -212,6 +212,22 @@ function istToUnix(dtStr) {
   return Math.floor(new Date(s + '+05:30').getTime() / 1000);
 }
 
+// Normalise a CT timestamp to Unix seconds.
+// CT's profiles export stores last_seen as a 14-digit YYYYMMDDHHMMSS string (IST).
+// Event exports use the same format. Unix seconds are 10-digit.
+function ctTsToUnix(ts) {
+  if (!ts) return 0;
+  const s = String(ts);
+  if (s.length === 14) {
+    return Math.floor(
+      new Date(`${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}T${s.slice(8,10)}:${s.slice(10,12)}:${s.slice(12,14)}+05:30`).getTime() / 1000
+    );
+  }
+  const n = Number(ts);
+  if (!isFinite(n) || n <= 0) return 0;
+  return n > 1e11 ? Math.floor(n / 1000) : n; // handle ms just in case
+}
+
 // Count unique users who fired eventName ≥1 times in [fromISO, toISO] (IST datetimes)
 async function fetchProfileCount(eventName, fromISO, toISO, eventProperties = null) {
   const ef = { name: eventName, from: istToUnix(fromISO), to: istToUnix(toISO), operator: 'ge', value: 1 };
@@ -664,14 +680,16 @@ const LIFECYCLE_TTL  = 60 * 60 * 1000;
 const LC_SEG_KEYS    = ['overall', 'new', 'early', 'active', 'power', 'churned'];
 
 // profile can be a /1/profiles.json record OR the nested profile inside a /1/events.json record.
-// CT stores orderscount lowercase in profileData on event records; profiles export may vary.
+// OC = profileData.orderscount (CT built-in, always prefer over event counts).
+// last_seen may be CT's 14-digit YYYYMMDDHHMMSS — normalise via ctTsToUnix before comparing.
 function classifyLifecycleSegment(profile, churnCutoffSec) {
   if (!profile) return 'new';
   const pd = profile.profileData || {};
   const ev = profile.events || {};
-  const oc = pd.orderscount ?? pd['Orders Count']
-    ?? ev['Charged']?.count ?? ev['Order Placed']?.count ?? 0;
-  const lastCharged = ev['Charged']?.last_seen || 0;
+  // Only use the profile-level orderscount — never fall back to raw Charged event count,
+  // which can be inflated (multiple events per order) and causes over-counting in Active.
+  const oc = Number(pd.orderscount ?? pd['Orders Count'] ?? pd['orders_count'] ?? 0);
+  const lastCharged = ctTsToUnix(ev['Charged']?.last_seen || 0);
   const isRecent    = lastCharged >= churnCutoffSec;
 
   if (oc === 0)  return 'new';
@@ -685,7 +703,7 @@ app.get('/api/lifecycle-segments', async (req, res) => {
   const { from, to } = req.query;
   if (!from || !to) return res.status(400).json({ success: false, error: 'from and to required' });
 
-  const cacheKey = `lifecycle_v13_${from.slice(0, 10)}_${to.slice(0, 10)}`;
+  const cacheKey = `lifecycle_v14_${from.slice(0, 10)}_${to.slice(0, 10)}`;
   const cached   = lifecycleCache[cacheKey];
   if (cached && Date.now() - cached.ts < LIFECYCLE_TTL) {
     return res.json({ success: true, conversion: cached.conversion, basket: cached.basket, cached: true });
@@ -944,6 +962,44 @@ app.get('/api/debug-atc', async (req, res) => {
       [`name contains "${keyword}"`]:         paNameContains,
     },
   });
+});
+
+// ── Lifecycle profile debug ───────────────────────────────────────────────────
+// GET /api/debug-lc-profiles?date=2026-05-31
+// Returns first 15 search profiles with raw profileData + classification
+
+app.get('/api/debug-lc-profiles', async (req, res) => {
+  const date = (req.query.date || istDate(1)).slice(0, 10);
+  const d    = parseInt(date.replace(/-/g, ''), 10);
+  const churnCutoff = istToUnix(date) - 60 * 24 * 60 * 60;
+  try {
+    const profiles = await exportCTProfiles('Screen Loaded', d, d, [{ name: 'name', operator: 'equals', value: 'Search' }]);
+    const sample = profiles.slice(0, 15).map(p => {
+      const pd = p.profileData || {};
+      const ev = p.events || {};
+      const oc = Number(pd.orderscount ?? pd['Orders Count'] ?? pd['orders_count'] ?? 0);
+      const lastSeenRaw = ev['Charged']?.last_seen || 0;
+      const lastSeen    = ctTsToUnix(lastSeenRaw);
+      return {
+        identity:           p.identity,
+        objectId:           p.objectId,
+        pd_orderscount:     pd.orderscount,
+        pd_OrdersCount:     pd['Orders Count'],
+        pd_orders_count:    pd['orders_count'],
+        ev_Charged_count:   ev['Charged']?.count,
+        ev_Charged_last_seen_raw: lastSeenRaw,
+        ev_Charged_last_seen_unix: lastSeen,
+        churnCutoff,
+        isRecent:           lastSeen >= churnCutoff,
+        oc_used:            oc,
+        segment:            classifyLifecycleSegment(p, churnCutoff),
+        profileData_keys:   Object.keys(pd).slice(0, 30),
+      };
+    });
+    res.json({ date, total: profiles.length, churnCutoff, sample });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ── Static + start ────────────────────────────────────────────────────────────
