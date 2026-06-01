@@ -703,7 +703,7 @@ app.get('/api/lifecycle-segments', async (req, res) => {
   const { from, to } = req.query;
   if (!from || !to) return res.status(400).json({ success: false, error: 'from and to required' });
 
-  const cacheKey = `lifecycle_v16_${from.slice(0, 10)}_${to.slice(0, 10)}`;
+  const cacheKey = `lifecycle_v19_${from.slice(0, 10)}_${to.slice(0, 10)}`;
   const cached   = lifecycleCache[cacheKey];
   if (cached && Date.now() - cached.ts < LIFECYCLE_TTL) {
     return res.json({ success: true, conversion: cached.conversion, basket: cached.basket, cached: true });
@@ -714,13 +714,20 @@ app.get('/api/lifecycle-segments', async (req, res) => {
   const churnCutoff = istToUnix(to) - 60 * 24 * 60 * 60;
 
   try {
-    const [appEvents, screenEvents, atcEvents, orderEvents, chargedEvents] = await Promise.all([
+    // CT silently returns 0 records when too many export sessions run concurrently.
+    // Fetch in batches of 2 to stay within CT's session limit.
+    const [appEvents, screenEvents] = await Promise.all([
       exportCTEvents('App Launched',  fromD, toD),
       exportCTEvents('Screen Loaded', fromD, toD),
+    ]);
+    const [atcEvents, orderEvents] = await Promise.all([
       exportCTEvents('Product Added', fromD, toD),
       exportCTEvents('Order Placed',  fromD, toD),
-      exportCTEvents('Charged',       fromD, toD),
     ]);
+    const chargedEvents = await exportCTEvents('Charged', fromD, toD);
+
+    console.log(`[lifecycle ${fromD}-${toD}] raw events — App:${appEvents.length} Screen:${screenEvents.length} ATC:${atcEvents.length} Order:${orderEvents.length} Charged:${chargedEvents.length}`);
+    console.log(`[lifecycle ${fromD}-${toD}] App events w/ profile: ${appEvents.filter(e => e.profile).length}`);
 
     // Deduplicate events to unique user profiles (one profile per user per metric)
     function dedupeProfiles(events, filterFn) {
@@ -933,6 +940,23 @@ app.get('/api/debug-profile-filter', async (req, res) => {
       filterWorking: typeof profileOC0 === 'number' && profileOC0 !== profileAll,
     },
   });
+});
+
+// ── Debug: raw events export structure ───────────────────────────────────────
+app.get('/api/debug-events-export', async (req, res) => {
+  const date      = req.query.date || istDate(1);
+  const eventName = req.query.event || 'App Launched';
+  const d         = parseInt(date.replace(/-/g, ''), 10);
+  try {
+    const init = await ctRequest('POST', '/1/events.json', { event_name: eventName, from: d, to: d });
+    if (!init.cursor) return res.json({ error: 'no cursor', init });
+    const page = await ctRequest('GET', `/1/events.json?cursor=${init.cursor}`);
+    const records = page.records || [];
+    const withProfile    = records.filter(r => !!r.profile).length;
+    const withoutProfile = records.filter(r => !r.profile).length;
+    const sample         = records.slice(0, 3);
+    res.json({ date, eventName, totalOnPage: records.length, withProfile, withoutProfile, sampleKeys: records[0] ? Object.keys(records[0]) : [], sample });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── Env check ────────────────────────────────────────────────────────────────
