@@ -371,7 +371,7 @@
 
     /* ── Lifecycle segment table ── */
     .seg-wrap { overflow-x: auto; }
-    .seg-table { width: 100%; border-collapse: collapse; min-width: 720px; }
+    .seg-table { width: 100%; border-collapse: collapse; min-width: 680px; }
     .seg-table thead th {
       padding: 6px 12px;
       font-size: 10px;
@@ -390,18 +390,26 @@
     .seg-table tbody tr:last-child td { border-bottom: none; }
     .seg-b2c > td { background: #EEEDFE; }
     .seg-b2b > td { background: #FAEEDA; }
-    .seg-b2c.seg-last-row > td { border-bottom: 2px solid #C7C4F5; }
-    .seg-b2b.seg-last-row > td { border-bottom: none; }
-    .seg-channel { font-weight: 800; font-size: 11px; text-align: center !important; vertical-align: middle !important; letter-spacing: 0.04em; }
+    .seg-channel { font-weight: 800; font-size: 11px; text-align: center; vertical-align: middle; }
     .seg-channel-b2c { background: #D9D6FB !important; color: #4338CA; }
     .seg-channel-b2b { background: #F0CFA0 !important; color: #92400E; }
     .seg-type { font-weight: 600; white-space: nowrap; }
     .seg-def  { color: var(--muted); font-size: 11px; white-space: nowrap; }
+    .seg-owner { color: var(--muted); font-size: 11px; }
     .seg-num  { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
     .seg-power   > .seg-type,
     .seg-power   > .seg-num  { color: #1D4ED8; }
     .seg-churned > .seg-type,
     .seg-churned > .seg-num  { color: #9CA3AF; }
+    .seg-overall > td        { background: #F1F5F9; font-weight: 600; border-bottom: 2px solid #E2E8F0; }
+    .seg-section-label {
+      padding: 6px 14px 2px;
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
 
     /* ── Pivot table ── */
     .pivot-wrapper { overflow-x: auto; }
@@ -559,9 +567,8 @@
         <table class="seg-table">
           <thead>
             <tr>
-              <th class="th-left" style="width:52px">Channel</th>
-              <th class="th-left" style="width:130px">User Type</th>
-              <th class="th-left" style="width:190px">Definition</th>
+              <th class="th-left" style="width:140px">User Type</th>
+              <th class="th-left" style="width:210px">Definition</th>
               <th>App Open<i class="info-tip" onmouseenter="showTip(event,'lcAppOpen')" onmouseleave="hideTip()">i</i></th>
               <th>Search<i class="info-tip" onmouseenter="showTip(event,'lcSearch')" onmouseleave="hideTip()">i</i></th>
               <th>Add to Cart<i class="info-tip" onmouseenter="showTip(event,'lcAtc')" onmouseleave="hideTip()">i</i></th>
@@ -569,7 +576,7 @@
             </tr>
           </thead>
           <tbody id="lcConvBody">
-            <tr><td colspan="7" class="conv-empty">Select a date range and click Load</td></tr>
+            <tr><td colspan="6" class="conv-empty">Select a date range and click Load</td></tr>
           </tbody>
         </table>
       </div>
@@ -585,9 +592,8 @@
         <table class="seg-table">
           <thead>
             <tr>
-              <th class="th-left" style="width:52px">Channel</th>
-              <th class="th-left" style="width:130px">User Type</th>
-              <th class="th-left" style="width:190px">Definition</th>
+              <th class="th-left" style="width:140px">User Type</th>
+              <th class="th-left" style="width:210px">Definition</th>
               <th>App Open<i class="info-tip" onmouseenter="showTip(event,'lcAppOpen')" onmouseleave="hideTip()">i</i></th>
               <th>Unique SKUs<i class="info-tip" onmouseenter="showTip(event,'lcUniqueSkus')" onmouseleave="hideTip()">i</i></th>
               <th>Qty / SKU<i class="info-tip" onmouseenter="showTip(event,'lcQtyPerSku')" onmouseleave="hideTip()">i</i></th>
@@ -595,7 +601,7 @@
             </tr>
           </thead>
           <tbody id="lcBasketBody">
-            <tr><td colspan="7" class="conv-empty">Select a date range and click Load</td></tr>
+            <tr><td colspan="6" class="conv-empty">Select a date range and click Load</td></tr>
           </tbody>
         </table>
       </div>
@@ -689,27 +695,13 @@
   let lastLifecycleData = null;
   let activeTab         = 'conversion';
 
-  const LC_CHANNELS = [
-    {
-      key: 'b2c', label: 'B2C', rowCls: 'seg-b2c', chCls: 'seg-channel-b2c',
-      segs: [
-        { key:'new',     label:'New',             def:'OC = 0',              cls:'',            tip:'lcB2cNew'     },
-        { key:'early',   label:'Early Lifecycle', def:'OC 1–2, order ≤60d', cls:'',            tip:'lcB2cEarly'   },
-        { key:'active',  label:'Active',          def:'OC 3–9, order ≤60d', cls:'',            tip:'lcB2cActive'  },
-        { key:'power',   label:'Power',           def:'OC 10+, order ≤60d', cls:'seg-power',   tip:'lcB2cPower'   },
-        { key:'churned', label:'Churned',         def:'No order in 60 days', cls:'seg-churned', tip:'lcB2cChurned' },
-      ],
-    },
-    {
-      key: 'b2b', label: 'B2B', rowCls: 'seg-b2b', chCls: 'seg-channel-b2b',
-      segs: [
-        { key:'new',     label:'New',             def:'OC = 0',               cls:'',            tip:'lcB2bNew'     },
-        { key:'early',   label:'Early Lifecycle', def:'OC 1–5, order ≤30d',  cls:'',            tip:'lcB2bEarly'   },
-        { key:'active',  label:'Active',          def:'OC 6–20, order ≤30d', cls:'',            tip:'lcB2bActive'  },
-        { key:'power',   label:'Power',           def:'OC 21+, order ≤30d',  cls:'seg-power',   tip:'lcB2bPower'   },
-        { key:'churned', label:'Churned',         def:'No order in 30 days',  cls:'seg-churned', tip:'lcB2bChurned' },
-      ],
-    },
+  const LC_SEGS = [
+    { key:'overall', label:'Overall',         def:'All users (no filter)',    cls:'seg-overall', tip:'lcSegOverall' },
+    { key:'new',     label:'New',             def:'OC = 0',                  cls:'',            tip:'lcSegNew'     },
+    { key:'early',   label:'Early Lifecycle', def:'OC 1–2, charged ≤60d',    cls:'',            tip:'lcSegEarly'   },
+    { key:'active',  label:'Active',          def:'OC 3–9, charged ≤60d',    cls:'',            tip:'lcSegActive'  },
+    { key:'power',   label:'Power',           def:'OC 10+, charged ≤60d',    cls:'seg-power',   tip:'lcSegPower'   },
+    { key:'churned', label:'Churned',         def:'No charge in 60d',        cls:'seg-churned', tip:'lcSegChurned' },
   ];
 
   function tipIcon(key) {
@@ -1173,28 +1165,17 @@
 
   function renderLifecycleBody(tbodyId, data, metrics) {
     const tbody = document.getElementById(tbodyId);
-    const rows  = [];
-    for (const ch of LC_CHANNELS) {
-      const chData = data[ch.key] || {};
-      ch.segs.forEach((seg, i) => {
-        const rowData   = chData[seg.key] || {};
-        const metricTds = metrics.map(m =>
-          `<td class="seg-num">${lcNum(rowData[m.key], m.fmt)}</td>`
-        ).join('');
-        const channelTd = i === 0
-          ? `<td class="seg-channel ${ch.chCls}" rowspan="${ch.segs.length}">${ch.label}</td>`
-          : '';
-        const isLast = i === ch.segs.length - 1;
-        const rowCls = [ch.rowCls, seg.cls, isLast ? 'seg-last-row' : ''].filter(Boolean).join(' ');
-        rows.push(`<tr class="${rowCls}">
-          ${channelTd}
-          <td class="seg-type">${seg.label}${tipIcon(seg.tip)}</td>
-          <td class="seg-def">${seg.def}</td>
-          ${metricTds}
-        </tr>`);
-      });
-    }
-    tbody.innerHTML = rows.join('');
+    tbody.innerHTML = LC_SEGS.map(seg => {
+      const rowData   = data[seg.key] || {};
+      const metricTds = metrics.map(m =>
+        `<td class="seg-num">${lcNum(rowData[m.key], m.fmt)}</td>`
+      ).join('');
+      return `<tr class="${seg.cls}">
+        <td class="seg-type">${seg.label}${tipIcon(seg.tip)}</td>
+        <td class="seg-def">${seg.def}</td>
+        ${metricTds}
+      </tr>`;
+    }).join('');
   }
 
   async function loadLifecycle() {
@@ -1206,7 +1187,7 @@
     btn.innerHTML = '<span class="spin">⟳</span>';
     btn.disabled  = true;
 
-    const loading = '<tr><td colspan="7" class="conv-loading"><span class="spin">⟳</span> Loading — this may take 2–3 minutes…</td></tr>';
+    const loading = '<tr><td colspan="6" class="conv-loading"><span class="spin">⟳</span> Loading — this may take 2–3 minutes…</td></tr>';
     document.getElementById('lcConvBody').innerHTML   = loading;
     document.getElementById('lcBasketBody').innerHTML = loading;
 
@@ -1235,7 +1216,7 @@
       renderLifecycleBody('lcBasketBody', json.basket,     basketMetrics);
 
     } catch (e) {
-      const msg = `<tr><td colspan="7" class="conv-empty" style="color:var(--red)">Error: ${e.message}</td></tr>`;
+      const msg = `<tr><td colspan="6" class="conv-empty" style="color:var(--red)">Error: ${e.message}</td></tr>`;
       document.getElementById('lcConvBody').innerHTML   = msg;
       document.getElementById('lcBasketBody').innerHTML = msg;
     } finally {
@@ -1250,17 +1231,13 @@
     const wb = XLSX.utils.book_new();
 
     const makeSheet = (data, cols) => {
-      const header = ['Channel', 'User Type', 'Definition', ...cols.map(c => c.label)];
-      const rows   = [];
-      for (const ch of LC_CHANNELS) {
-        const chData = data[ch.key] || {};
-        for (const seg of ch.segs) {
-          const d = chData[seg.key] || {};
-          rows.push([ch.label, seg.label, seg.def, ...cols.map(c => d[c.key] ?? '')]);
-        }
-      }
+      const header = ['User Type', 'Definition', ...cols.map(c => c.label)];
+      const rows   = LC_SEGS.map(seg => {
+        const d = data[seg.key] || {};
+        return [seg.label, seg.def, ...cols.map(c => d[c.key] ?? '')];
+      });
       const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
-      ws['!cols'] = [{ wch:8 }, { wch:18 }, { wch:22 }, ...cols.map(() => ({ wch:14 }))];
+      ws['!cols'] = [{ wch:18 }, { wch:24 }, ...cols.map(() => ({ wch:14 }))];
       return ws;
     };
 
@@ -1358,16 +1335,12 @@ const TIPS = {
   lcQtyPerSku:     "Source: CleverTap\nExport: /1/events.json · Event: Product Added\nProperty: quantity",
   lcAov:           "Source: CleverTap\nExport: /1/events.json · Event: Charged\nProperty: Amount",
   // ── Lifecycle segment row definitions ───────────────────────────────────
-  lcB2cNew:     "B2C · profileData.gstin is empty or absent\norderscount = 0 (no orders ever)",
-  lcB2cEarly:   "B2C · gstin absent\norderscount 1–2\n+ last Charged event within 60 days of end date",
-  lcB2cActive:  "B2C · gstin absent\norderscount 3–9\n+ last Charged event within 60 days of end date",
-  lcB2cPower:   "B2C · gstin absent\norderscount 10+\n+ last Charged event within 60 days of end date",
-  lcB2cChurned: "B2C · gstin absent\norderscount > 0 but no Charged event in last 60 days",
-  lcB2bNew:     "B2B · profileData.gstin is non-empty\norderscount = 0 (no orders ever)",
-  lcB2bEarly:   "B2B · gstin present\norderscount 1–5\n+ last Charged event within 30 days of end date",
-  lcB2bActive:  "B2B · gstin present\norderscount 6–20\n+ last Charged event within 30 days of end date",
-  lcB2bPower:   "B2B · gstin present\norderscount 21+\n+ last Charged event within 30 days of end date",
-  lcB2bChurned: "B2B · gstin present\norderscount > 0 but no Charged event in last 30 days",
+  lcSegOverall: "No profile_filters — raw count of all users who fired each event in the date range\nUse this to verify CT is returning data",
+  lcSegNew:     "profileData.orderscount = 0\nNo recency condition",
+  lcSegEarly:   "profileData.orderscount 1–2\n+ last Charged event within 60 days of end date",
+  lcSegActive:  "profileData.orderscount 3–9\n+ last Charged event within 60 days of end date",
+  lcSegPower:   "profileData.orderscount 10+\n+ last Charged event within 60 days of end date",
+  lcSegChurned: "orderscount > 0 but no Charged event in the last 60 days",
   // ── Orders Segment tab ───────────────────────────────────────────────────
   totalOrders:     "Source: Shopify Orders API\nAll orders (any status) created in the date period",
   b2bDef:          "Source: Shopify Orders API\nDetection: shipping_address.company stripped of spaces/commas must be purely alphanumeric AND contain both letters and digits",
