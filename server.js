@@ -703,7 +703,7 @@ app.get('/api/lifecycle-segments', async (req, res) => {
   const { from, to } = req.query;
   if (!from || !to) return res.status(400).json({ success: false, error: 'from and to required' });
 
-  const cacheKey = `lifecycle_v15_${from.slice(0, 10)}_${to.slice(0, 10)}`;
+  const cacheKey = `lifecycle_v16_${from.slice(0, 10)}_${to.slice(0, 10)}`;
   const cached   = lifecycleCache[cacheKey];
   if (cached && Date.now() - cached.ts < LIFECYCLE_TTL) {
     return res.json({ success: true, conversion: cached.conversion, basket: cached.basket, cached: true });
@@ -714,26 +714,33 @@ app.get('/api/lifecycle-segments', async (req, res) => {
   const churnCutoff = istToUnix(to) - 60 * 24 * 60 * 60;
 
   try {
-    const [appProfiles, atcProfiles, orderProfiles, screenEvents, atcEvents, chargedEvents] = await Promise.all([
-      exportCTProfiles('App Launched',  fromD, toD),
-      exportCTProfiles('Product Added', fromD, toD),
-      exportCTProfiles('Order Placed',  fromD, toD),
-      exportCTEvents('Screen Loaded',   fromD, toD),   // filter for Search client-side
-      exportCTEvents('Product Added',   fromD, toD),
-      exportCTEvents('Charged',         fromD, toD),
+    const [appEvents, screenEvents, atcEvents, orderEvents, chargedEvents] = await Promise.all([
+      exportCTEvents('App Launched',  fromD, toD),
+      exportCTEvents('Screen Loaded', fromD, toD),
+      exportCTEvents('Product Added', fromD, toD),
+      exportCTEvents('Order Placed',  fromD, toD),
+      exportCTEvents('Charged',       fromD, toD),
     ]);
 
-    // Unique users who viewed the Search screen — deduplicate from event records
-    const searchSeen = new Set();
-    const searchProfiles = [];
-    for (const ev of screenEvents) {
-      const name = ev.event_props?.name || ev.event_props?.Name || '';
-      if (name !== 'Search') continue;
-      const uid = ev.profile?.objectId || ev.profile?.identity;
-      if (uid && searchSeen.has(uid)) continue;
-      if (uid) searchSeen.add(uid);
-      if (ev.profile) searchProfiles.push(ev.profile);
+    // Deduplicate events to unique user profiles (one profile per user per metric)
+    function dedupeProfiles(events, filterFn) {
+      const seen = new Set();
+      const out  = [];
+      for (const ev of events) {
+        if (filterFn && !filterFn(ev)) continue;
+        const uid = ev.profile?.objectId || ev.profile?.identity;
+        if (!ev.profile) continue;
+        if (uid && seen.has(uid)) continue;
+        if (uid) seen.add(uid);
+        out.push(ev.profile);
+      }
+      return out;
     }
+
+    const appProfiles    = dedupeProfiles(appEvents);
+    const searchProfiles = dedupeProfiles(screenEvents, ev => (ev.event_props?.name || ev.event_props?.Name) === 'Search');
+    const atcProfiles    = dedupeProfiles(atcEvents);
+    const orderProfiles  = dedupeProfiles(orderEvents);
 
     // ── Conversion funnel: unique users per segment ────────────────────────
     const mkConv = () => ({ appOpen: 0, search: 0, atc: 0, orderPlaced: 0 });
