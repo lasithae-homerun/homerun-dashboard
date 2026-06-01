@@ -695,23 +695,25 @@ function classifyLifecycleSegment(profile, churnCutoffSec) {
   if (oc === 0)  return 'new';
   if (!isRecent) return 'churned';
   if (oc <= 2)   return 'early';   // OC 1–2
-  if (oc <= 9)   return 'active';  // OC 3–9
-  return 'power';                   // OC 10+
+  if (oc <= 10)  return 'active';  // OC 3–10 (matches CT: OC > 2 AND OC < 11)
+  return 'power';                   // OC 11+
 }
 
 app.get('/api/lifecycle-segments', async (req, res) => {
   const { from, to } = req.query;
   if (!from || !to) return res.status(400).json({ success: false, error: 'from and to required' });
 
-  const cacheKey = `lifecycle_v19_${from.slice(0, 10)}_${to.slice(0, 10)}`;
+  const cacheKey = `lifecycle_v20_${from.slice(0, 10)}_${to.slice(0, 10)}`;
   const cached   = lifecycleCache[cacheKey];
   if (cached && Date.now() - cached.ts < LIFECYCLE_TTL) {
     return res.json({ success: true, conversion: cached.conversion, basket: cached.basket, cached: true });
   }
 
-  const fromD       = parseInt(from.slice(0, 10).replace(/-/g, ''), 10);
-  const toD         = parseInt(to.slice(0, 10).replace(/-/g, ''), 10);
-  const churnCutoff = istToUnix(to) - 60 * 24 * 60 * 60;
+  const fromD = parseInt(from.slice(0, 10).replace(/-/g, ''), 10);
+  const toD   = parseInt(to.slice(0, 10).replace(/-/g, ''), 10);
+  // Use today (IST) as the recency anchor to match CT's "last 60 days" definition,
+  // which is always relative to the current day regardless of selected date range.
+  const churnCutoff = istToUnix(istDate(0)) - 60 * 24 * 60 * 60;
 
   try {
     // CT silently returns 0 records when too many export sessions run concurrently.
