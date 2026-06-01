@@ -72,16 +72,27 @@ async function fetchOrdersForDate(dateStr) {
   return orders;
 }
 
+async function fetchOrdersInRange(fromDate, toDate) {
+  const min = encodeURIComponent(`${fromDate}T00:00:00+05:30`);
+  const max = encodeURIComponent(`${toDate}T23:59:59+05:30`);
+  let urlPath = `/admin/api/2024-01/orders.json?status=any&created_at_min=${min}&created_at_max=${max}&limit=250&fields=id,source_name,line_items`;
+  const orders = [];
+  while (urlPath) {
+    const { body, link } = await shopifyGet(urlPath);
+    orders.push(...(body.orders || []));
+    urlPath = nextShopifyPath(link);
+  }
+  return orders;
+}
+
 // ── Business logic ────────────────────────────────────────────────────────────
 
-// [1-9A-Z]? makes the check-digit before Z optional, catching 14-char entries missing one character
-const GST_REGEX = /[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]?Z[0-9A-Z]/;
-
 function isB2B(order) {
-  const company = (order.shipping_address?.company || '').toUpperCase();
+  const company = (order.shipping_address?.company || '').trim();
   if (!company) return false;
-  // Match GST as-is, or after stripping spaces/commas (catches "29ABKFM, 5470D1Z2" style entries)
-  return GST_REGEX.test(company) || GST_REGEX.test(company.replace(/[\s,]/g, ''));
+  // Strip spaces/commas then check: alphanumeric only AND contains both letters and digits
+  const s = company.replace(/[\s,]/g, '');
+  return /^[A-Za-z0-9]+$/.test(s) && /[A-Za-z]/.test(s) && /[0-9]/.test(s);
 }
 
 function isBulkOrder(order) {
@@ -185,6 +196,39 @@ async function ctPoll(reqId, retries = 10, delayMs = 600) {
   throw new Error('CT polling timeout');
 }
 
+async function ctPollProfiles(reqId, retries = 10, delayMs = 600) {
+  for (let i = 0; i < retries; i++) {
+    await sleep(delayMs);
+    const r = await ctRequest('GET', `/1/counts/profiles.json?req_id=${reqId}`);
+    if (r.status === 'success') return r;
+    if (r.status === 'fail')    throw new Error(r.error || 'CT profile count failed');
+  }
+  throw new Error('CT profile count polling timeout');
+}
+
+// Convert IST datetime string ("2026-05-31T00:00:00") to Unix seconds
+function istToUnix(dtStr) {
+  const s = dtStr.length > 10 ? dtStr : dtStr + 'T00:00:00';
+  return Math.floor(new Date(s + '+05:30').getTime() / 1000);
+}
+
+// Count unique users who fired eventName ≥1 times in [fromISO, toISO] (IST datetimes)
+async function fetchProfileCount(eventName, fromISO, toISO, eventProperties = null) {
+  const ef = { name: eventName, from: istToUnix(fromISO), to: istToUnix(toISO), operator: 'ge', value: 1 };
+  if (eventProperties) ef.event_properties = eventProperties;
+  const body = { event_filters: [ef], profile_filters: [] };
+  try {
+    const init = await ctRequest('POST', '/1/counts/profiles.json', body);
+    if (init.status === 'success') return typeof init.count === 'number' ? init.count : null;
+    if (!init.req_id) throw new Error(`No req_id: ${JSON.stringify(init).slice(0, 200)}`);
+    const result = await ctPollProfiles(init.req_id);
+    return typeof result.count === 'number' ? result.count : null;
+  } catch (e) {
+    console.error(`[CT profile count] ${eventName}:`, e.message);
+    return null;
+  }
+}
+
 async function fetchCTCount(eventName, props, dateStr) {
   const d    = parseInt(dateStr.replace(/-/g, ''), 10);
   const body = { event_name: eventName, from: d, to: d };
@@ -201,10 +245,62 @@ async function fetchCTCount(eventName, props, dateStr) {
   }
 }
 
+// Export all records for an event in a date range via cursor pagination
+async function exportCTEvents(eventName, fromD, toD) {
+  const init = await ctRequest('POST', '/1/events.json', { event_name: eventName, from: fromD, to: toD });
+  if (!init.cursor) throw new Error(`Events export no cursor for ${eventName}: ${JSON.stringify(init).slice(0, 200)}`);
+  const records = [];
+  let cursor = init.cursor;
+  while (cursor) {
+    const page = await ctRequest('GET', `/1/events.json?cursor=${cursor}`);
+    records.push(...(page.records || []));
+    cursor = page.next_cursor || page.cursor || null;
+  }
+  return records;
+}
+
+// Decode HTML entities from CT-stored strings (&amp; → &)
+function htmlDecode(str) {
+  return typeof str === 'string' ? str.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>') : '';
+}
+
+// Match a CT product title to a category using the product-map
+function matchCategory(rawTitle) {
+  if (!rawTitle) return null;
+  const title = htmlDecode(rawTitle).toLowerCase();
+  for (const { key, collection } of PRODUCT_ENTRIES) {
+    if (title.includes(key.toLowerCase())) return collection;
+  }
+  return null;
+}
+
+// Convert CT YYYYMMDDHHMMSS timestamp (14-digit number) to YYYY-MM-DD
+function tsToISTDate(ts) {
+  const s = String(ts);
+  if (s.length < 8) return null;
+  return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
+}
+
+async function fetchCTCountRange(eventName, eventProps, profileFilters, fromD, toD) {
+  const body = { event_name: eventName, from: fromD, to: toD };
+  if (eventProps     && eventProps.length)     body.event_properties = eventProps;
+  if (profileFilters && profileFilters.length) body.profile_filters  = profileFilters;
+  try {
+    const init = await ctRequest('POST', '/1/counts/events.json', body);
+    if (init.status === 'success') return typeof init.count === 'number' ? init.count : null;
+    if (!init.req_id)              throw new Error(`No req_id: ${JSON.stringify(init)}`);
+    const result = await ctPoll(init.req_id);
+    return typeof result.count === 'number' ? result.count : null;
+  } catch (e) {
+    console.error(`[CT range] ${eventName}:`, e.message);
+    return null;
+  }
+}
+
 function getDatesInRange(from, to) {
   const dates = [];
-  const cur   = new Date(from + 'T00:00:00Z');
-  const end   = new Date(to   + 'T00:00:00Z');
+  const cur   = new Date(from.slice(0, 10) + 'T00:00:00Z');
+  const end   = new Date(to.slice(0, 10)   + 'T00:00:00Z');
   while (cur <= end && dates.length < 31) {
     dates.push(cur.toISOString().slice(0, 10));
     cur.setUTCDate(cur.getUTCDate() + 1);
@@ -235,26 +331,43 @@ const PRODUCT_MAP = (() => {
 // [ { key: 'Ultratech PPC Cement', collection: 'Cement' }, ... ]
 const PRODUCT_ENTRIES = Object.entries(PRODUCT_MAP).map(([key, collection]) => ({ key, collection }));
 
-// ── CT range count (from/to as date strings) ──────────────────────────────────
-
-async function fetchCTCountRange(eventName, props, fromStr, toStr) {
-  const f = parseInt(fromStr.replace(/-/g, ''), 10);
-  const t = parseInt(toStr.replace(/-/g, ''), 10);
-  const body = { event_name: eventName, from: f, to: t };
-  if (props && props.length) body.event_properties = props;
-  try {
-    const init = await ctRequest('POST', '/1/counts/events.json', body);
-    if (init.status === 'success') return typeof init.count === 'number' ? init.count : 0;
-    if (!init.req_id) return 0;
-    const result = await ctPoll(init.req_id);
-    return typeof result.count === 'number' ? result.count : 0;
-  } catch (e) {
-    return 0;
-  }
-}
 
 const appProductsCache = {};
 const APP_PROD_TTL     = 30 * 60 * 1000;
+
+// Shopify product/variant ID → product title map (lazy, 6h TTL)
+// CT events store product_id as either a Product GID or ProductVariant GID — map both.
+let productLookupCache = null;
+let productLookupFetchedAt = 0;
+const PRODUCT_LOOKUP_TTL = 6 * 60 * 60 * 1000;
+
+async function getProductLookup() {
+  if (productLookupCache && Date.now() - productLookupFetchedAt < PRODUCT_LOOKUP_TTL) return productLookupCache;
+  const map = {};
+  let url = '/admin/api/2024-01/products.json?limit=250&fields=id,title,variants';
+  while (url) {
+    const { body, link } = await shopifyGet(url);
+    for (const p of body.products || []) {
+      map[String(p.id)] = p.title;
+      for (const v of p.variants || []) {
+        map[String(v.id)] = p.title;
+      }
+    }
+    url = nextShopifyPath(link);
+  }
+  productLookupCache = map;
+  productLookupFetchedAt = Date.now();
+  console.log(`[product-lookup] built ${Object.keys(map).length} entries`);
+  return map;
+}
+
+// Extract numeric ID from a Shopify GID string or plain ID
+function extractShopifyId(gidOrId) {
+  if (!gidOrId) return null;
+  const s = String(gidOrId);
+  const m = s.match(/(\d+)$/);
+  return m ? m[1] : null;
+}
 
 function isFresh(entry) {
   return entry && Date.now() - entry.ts < CACHE_TTL;
@@ -345,70 +458,444 @@ app.get('/api/conversion', async (req, res) => {
   }
 });
 
-// ── App Product Added by category ────────────────────────────────────────────
+// ── App/Web Product Added by category ────────────────────────────────────────
 
 app.get('/api/app-products', async (req, res) => {
   const { from, to } = req.query;
   if (!from || !to) return res.status(400).json({ success: false, error: 'from and to required' });
 
-  const cacheKey = `v4_${from}_${to}`;
+  const cacheKey = `v17_${from.slice(0, 10)}_${to.slice(0, 10)}`;
   const cached   = appProductsCache[cacheKey];
   if (cached && Date.now() - cached.ts < APP_PROD_TTL) {
-    return res.json({ success: true, app: cached.app, web: cached.web, categories: cached.categories, cached: true });
+    return res.json({ success: true, app: cached.app, web: cached.web, categories: cached.categories, appSkusOrdered: cached.appSkusOrdered, webSkusOrdered: cached.webSkusOrdered, cached: true });
   }
 
   try {
-    const dates      = getDatesInRange(from, to);
-    const BATCH = 50;
+    const fromD = parseInt(from.slice(0, 10).replace(/-/g, ''), 10);
+    const toD   = parseInt(to.slice(0, 10).replace(/-/g, ''), 10);
+    const dates = getDatesInRange(from, to);
 
-    const aRows = [], wRows = [];
-    await Promise.all(dates.map(async (dateStr) => {
-      const appTotals = {};
-      const webTotals = {};
+    // Export all events + product lookup + orders in parallel
+    const [appEvents, webEvents, productLookup, orders] = await Promise.all([
+      exportCTEvents('Product Added', fromD, toD),
+      exportCTEvents('Added to Cart', fromD, toD),
+      getProductLookup(),
+      fetchOrdersInRange(from.slice(0, 10), to.slice(0, 10)),
+    ]);
 
-      for (let i = 0; i < PRODUCT_ENTRIES.length; i += BATCH) {
-        const slice = PRODUCT_ENTRIES.slice(i, i + BATCH);
-        const [appRes, webRes] = await Promise.all([
-          Promise.all(slice.map(({ key }) =>
-            fetchCTCount('Product Added', [{ name: 'product_name', operator: 'contains', value: key }], dateStr)
-          )),
-          Promise.all(slice.map(({ key }) =>
-            fetchCTCount('Added to Cart', [{ name: 'title',        operator: 'contains', value: key }], dateStr)
-          )),
-        ]);
-        slice.forEach(({ collection }, j) => {
-          appTotals[collection] = (appTotals[collection] || 0) + (appRes[j] || 0);
-          webTotals[collection] = (webTotals[collection] || 0) + (webRes[j] || 0);
-        });
-      }
+    // Resolve Shopify product title from CT event_props.
+    // App events:  product_id (Product or Variant GID), variant_id (Variant GID), variant (Variant GID or option string)
+    // Web events:  'Product ID' / 'Variant ID' (plain numeric, no GID prefix)
+    function resolveTitle(props) {
+      const pid = extractShopifyId(props?.product_id || props?.['Product ID']);
+      const vid = extractShopifyId(props?.variant_id || props?.['Variant ID']) || extractShopifyId(props?.variant);
+      return (pid && productLookup[pid]) || (vid && productLookup[vid]) || null;
+    }
 
-      const toRow = (totals) => {
-        const row = { date: dateStr };
-        for (const [k, v] of Object.entries(totals)) if (v > 0) row[k] = v;
-        return row;
-      };
-      aRows.push(toRow(appTotals));
-      wRows.push(toRow(webTotals));
-    }));
+    // Build per-date row maps
+    const appMap = {}, webMap = {};
+    for (const d of dates) { appMap[d] = { date: d }; webMap[d] = { date: d }; }
 
-    const sort    = rows => rows.sort((a, b) => a.date.localeCompare(b.date));
-    const appRows = sort(aRows);
-    const webRows = sort(wRows);
+    for (const ev of appEvents) {
+      const d = tsToISTDate(ev.ts);
+      if (!appMap[d]) continue;
+      // Shopify lookup (product_id / variant_id) wins; CT product_name as fallback
+      const resolved = resolveTitle(ev.event_props);
+      const cat = matchCategory(resolved || '')
+        || matchCategory(ev.event_props?.product_name || '')
+        || 'Other';
+      appMap[d][cat] = (appMap[d][cat] || 0) + 1;
+    }
 
+    for (const ev of webEvents) {
+      const d = tsToISTDate(ev.ts);
+      if (!webMap[d]) continue;
+      // Web: Shopify lookup by Product ID/Variant ID first; CT Title+VariantTitle as fallback
+      const resolved = resolveTitle(ev.event_props);
+      const ctTitle = [
+        ev.event_props?.Title || ev.event_props?.title || '',
+        ev.event_props?.['Variant Title'] || '',
+      ].filter(Boolean).join(' ');
+      const cat = matchCategory(resolved || '')
+        || matchCategory(ctTitle)
+        || 'Other';
+      webMap[d][cat] = (webMap[d][cat] || 0) + 1;
+    }
+
+    const appRows = dates.map(d => appMap[d]);
+    const webRows = dates.map(d => webMap[d]);
+
+    // Sort categories by app total desc; "Other" always last
     const totals = {};
     for (const row of appRows) {
       for (const [k, v] of Object.entries(row)) {
         if (k !== 'date') totals[k] = (totals[k] || 0) + v;
       }
     }
-    const categories = Object.keys(totals).sort((a, b) => totals[b] - totals[a]);
+    const categories = Object.keys(totals).filter(k => k !== 'Other').sort((a, b) => totals[b] - totals[a]);
+    if (totals['Other']) categories.push('Other');
 
-    appProductsCache[cacheKey] = { app: appRows, web: webRows, categories, ts: Date.now() };
-    res.json({ success: true, app: appRows, web: webRows, categories });
+    // Unique SKUs ordered per collection, split by sales channel (app vs web)
+    const appSkuSets = {}, webSkuSets = {};
+    for (const order of orders) {
+      const sets = order.source_name === APP_SOURCE ? appSkuSets : webSkuSets;
+      for (const item of order.line_items || []) {
+        const pid = String(item.product_id || '');
+        const vid = String(item.variant_id || '');
+        const cat = matchCategory(item.title || '')
+          || (pid && matchCategory(productLookup[pid] || ''))
+          || (vid && matchCategory(productLookup[vid] || ''))
+          || 'Other';
+        if (!sets[cat]) sets[cat] = new Set();
+        sets[cat].add(item.sku || vid || `${pid}-${vid}`);
+      }
+    }
+    const appSkusOrdered = {}, webSkusOrdered = {};
+    for (const [cat, s] of Object.entries(appSkuSets)) appSkusOrdered[cat] = s.size;
+    for (const [cat, s] of Object.entries(webSkuSets)) webSkusOrdered[cat] = s.size;
+
+    appProductsCache[cacheKey] = { app: appRows, web: webRows, categories, appSkusOrdered, webSkusOrdered, ts: Date.now() };
+    res.json({ success: true, app: appRows, web: webRows, categories, appSkusOrdered, webSkusOrdered });
   } catch (err) {
     console.error('[/api/app-products]', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
+});
+
+// ── App User Segments (by order count × active/churned) ──────────────────
+// CT's counts API ignores profile_filters; use profiles export instead.
+// Each profile record includes lifetime event data (count + last_seen per event).
+// OC bucket  ← events['Order Placed'].count (or 'Charged' as fallback)
+// Active     ← last purchase event last_seen > 30 days ago cutoff
+
+const userSegsCache = {};
+const USER_SEGS_TTL = 30 * 60 * 1000;
+
+async function exportCTProfiles(eventName, fromD, toD, eventProperties = null, profileFilters = null) {
+  const body = { event_name: eventName, from: fromD, to: toD };
+  if (eventProperties) body.event_properties = eventProperties;
+  if (profileFilters)  body.profile_filters  = profileFilters;
+  const init = await ctRequest('POST', '/1/profiles.json', body);
+  if (!init.cursor) throw new Error(`Profiles export no cursor: ${JSON.stringify(init).slice(0, 200)}`);
+  const seen = new Set();
+  const profiles = [];
+  let cursor = init.cursor;
+  while (cursor) {
+    const page = await ctRequest('GET', `/1/profiles.json?cursor=${cursor}`);
+    for (const p of (page.records || [])) {
+      const id = p.objectId || p.identity || JSON.stringify(p).slice(0, 80);
+      if (!seen.has(id)) { seen.add(id); profiles.push(p); }
+    }
+    cursor = page.next_cursor || page.cursor || null;
+  }
+  return profiles;
+}
+
+function ocBucket(profile) {
+  const ev  = profile.events || {};
+  const oc  = ev['Order Placed']?.count || ev['Charged']?.count || 0;
+  if (oc >= 5) return 'OC=5+';
+  return `OC=${oc}`;
+}
+
+function isActive(profile, cutoffSec) {
+  const ev   = profile.events || {};
+  const last = Math.max(ev['Order Placed']?.last_seen || 0, ev['Charged']?.last_seen || 0);
+  return last > cutoffSec;
+}
+
+app.get('/api/user-segments', async (req, res) => {
+  const { from, to } = req.query;
+  if (!from || !to) return res.status(400).json({ success: false, error: 'from and to required' });
+
+  const cacheKey = `userseg_v2_${from.slice(0, 10)}_${to.slice(0, 10)}`;
+  const cached   = userSegsCache[cacheKey];
+  if (cached && Date.now() - cached.ts < USER_SEGS_TTL) {
+    return res.json({ success: true, active: cached.active, churned: cached.churned, cached: true });
+  }
+
+  const fromD      = parseInt(from.slice(0, 10).replace(/-/g, ''), 10);
+  const toD        = parseInt(to.slice(0, 10).replace(/-/g, ''), 10);
+  const cutoffSec  = Math.floor((Date.now() - 30 * 24 * 60 * 60 * 1000) / 1000);
+  const OC_LABELS  = ['OC=0', 'OC=1', 'OC=2', 'OC=3', 'OC=4', 'OC=5+'];
+
+  try {
+    const [appProfiles, atcProfiles, orderProfiles] = await Promise.all([
+      exportCTProfiles('App Launched',  fromD, toD),
+      exportCTProfiles('Product Added', fromD, toD),
+      exportCTProfiles('Order Placed',  fromD, toD),
+    ]);
+
+    // Build empty buckets
+    const mkBuckets = () => Object.fromEntries(OC_LABELS.map(b => [b, { oc: b, appLaunched: 0, atc: 0, orderPlaced: 0 }]));
+    const active  = mkBuckets();
+    const churned = mkBuckets();
+
+    for (const p of appProfiles) {
+      const row = isActive(p, cutoffSec) ? active : churned;
+      row[ocBucket(p)].appLaunched++;
+    }
+    for (const p of atcProfiles) {
+      const row = isActive(p, cutoffSec) ? active : churned;
+      row[ocBucket(p)].atc++;
+    }
+    for (const p of orderProfiles) {
+      const row = isActive(p, cutoffSec) ? active : churned;
+      row[ocBucket(p)].orderPlaced++;
+    }
+
+    const result = {
+      active:  OC_LABELS.map(b => active[b]),
+      churned: OC_LABELS.map(b => churned[b]),
+    };
+
+    userSegsCache[cacheKey] = { ...result, ts: Date.now() };
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[/api/user-segments]', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── Lifecycle Segments ─────────────────────────────────────────────────────────
+
+const lifecycleCache = {};
+const LIFECYCLE_TTL  = 60 * 60 * 1000;
+const LC_SEG_KEYS    = ['overall', 'new', 'early', 'active', 'power', 'churned'];
+
+// profile can be a /1/profiles.json record OR the nested profile inside a /1/events.json record.
+// CT stores orderscount lowercase in profileData on event records; profiles export may vary.
+function classifyLifecycleSegment(profile, churnCutoffSec) {
+  if (!profile) return 'new';
+  const pd = profile.profileData || {};
+  const ev = profile.events || {};
+  const oc = pd.orderscount ?? pd['Orders Count']
+    ?? ev['Charged']?.count ?? ev['Order Placed']?.count ?? 0;
+  const lastCharged = ev['Charged']?.last_seen || 0;
+  const isRecent    = lastCharged >= churnCutoffSec;
+
+  if (oc === 0)  return 'new';
+  if (!isRecent) return 'churned';
+  if (oc <= 2)   return 'early';   // OC 1–2
+  if (oc <= 9)   return 'active';  // OC 3–9
+  return 'power';                   // OC 10+
+}
+
+app.get('/api/lifecycle-segments', async (req, res) => {
+  const { from, to } = req.query;
+  if (!from || !to) return res.status(400).json({ success: false, error: 'from and to required' });
+
+  const cacheKey = `lifecycle_v13_${from.slice(0, 10)}_${to.slice(0, 10)}`;
+  const cached   = lifecycleCache[cacheKey];
+  if (cached && Date.now() - cached.ts < LIFECYCLE_TTL) {
+    return res.json({ success: true, conversion: cached.conversion, basket: cached.basket, cached: true });
+  }
+
+  const fromD       = parseInt(from.slice(0, 10).replace(/-/g, ''), 10);
+  const toD         = parseInt(to.slice(0, 10).replace(/-/g, ''), 10);
+  const churnCutoff = istToUnix(to) - 60 * 24 * 60 * 60;
+
+  try {
+    const [appProfiles, searchProfiles, atcProfiles, orderProfiles, atcEvents, chargedEvents] = await Promise.all([
+      exportCTProfiles('App Launched',  fromD, toD),
+      exportCTProfiles('Screen Loaded', fromD, toD, [{ name: 'name', operator: 'equals', value: 'Search' }]),
+      exportCTProfiles('Product Added', fromD, toD),
+      exportCTProfiles('Order Placed',  fromD, toD),
+      exportCTEvents('Product Added',   fromD, toD),
+      exportCTEvents('Charged',         fromD, toD),
+    ]);
+
+    // ── Conversion funnel: unique users per segment ────────────────────────
+    const mkConv = () => ({ appOpen: 0, search: 0, atc: 0, orderPlaced: 0 });
+    const conv   = Object.fromEntries(LC_SEG_KEYS.map(s => [s, mkConv()]));
+
+    const countConv = (profiles, metric) => {
+      for (const p of profiles) {
+        const s = classifyLifecycleSegment(p, churnCutoff);
+        conv.overall[metric]++;
+        conv[s][metric]++;
+      }
+    };
+    countConv(appProfiles,    'appOpen');
+    countConv(searchProfiles, 'search');
+    countConv(atcProfiles,    'atc');
+    countConv(orderProfiles,  'orderPlaced');
+
+    // ── Basket: aggregate per segment ─────────────────────────────────────
+    // Each event record embeds a full user profile, so we can classify inline.
+    const mkBkt = () => ({ appOpen: 0, skuSet: new Set(), qtySum: 0, qtyCount: 0, aovSum: 0, aovCount: 0 });
+    const bkt   = Object.fromEntries(LC_SEG_KEYS.map(s => [s, mkBkt()]));
+
+    for (const p of appProfiles) {
+      const s = classifyLifecycleSegment(p, churnCutoff);
+      bkt.overall.appOpen++;
+      bkt[s].appOpen++;
+    }
+
+    for (const ev of atcEvents) {
+      const s   = classifyLifecycleSegment(ev.profile, churnCutoff);
+      const sku = ev.event_props?.variant_id || ev.event_props?.sku || ev.event_props?.product_name;
+      const qty = parseFloat(ev.event_props?.quantity) || 1;
+      if (sku) { bkt.overall.skuSet.add(String(sku)); if (bkt[s]) bkt[s].skuSet.add(String(sku)); }
+      bkt.overall.qtySum += qty; bkt.overall.qtyCount++;
+      if (bkt[s]) { bkt[s].qtySum += qty; bkt[s].qtyCount++; }
+    }
+
+    for (const ev of chargedEvents) {
+      const s   = classifyLifecycleSegment(ev.profile, churnCutoff);
+      const amt = parseFloat(ev.event_props?.Amount || ev.event_props?.amount || 0);
+      if (amt > 0) {
+        bkt.overall.aovSum += amt; bkt.overall.aovCount++;
+        if (bkt[s]) { bkt[s].aovSum += amt; bkt[s].aovCount++; }
+      }
+    }
+
+    const basket = Object.fromEntries(LC_SEG_KEYS.map(s => {
+      const d = bkt[s];
+      return [s, {
+        appOpen:    d.appOpen,
+        uniqueSkus: d.skuSet.size,
+        avgQty:     d.qtyCount > 0 ? +(d.qtySum / d.qtyCount).toFixed(1) : null,
+        aov:        d.aovCount > 0 ? +(d.aovSum / d.aovCount).toFixed(2) : null,
+      }];
+    }));
+
+    const result = { conversion: conv, basket };
+    lifecycleCache[cacheKey] = { ...result, ts: Date.now() };
+    res.json({ success: true, ...result });
+
+  } catch (err) {
+    console.error('[/api/lifecycle-segments]', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── Web ATC "Other" inspector ─────────────────────────────────────────────
+
+app.get('/api/web-atc-other', async (req, res) => {
+  const from = (req.query.from || istDate(7)).slice(0, 10);
+  const to   = (req.query.to   || istDate(1)).slice(0, 10);
+  const fromD = parseInt(from.replace(/-/g, ''), 10);
+  const toD   = parseInt(to.replace(/-/g, ''), 10);
+
+  // Export all "Added to Cart" events in range
+  const exportInit = await ctRequest('POST', '/1/events.json', {
+    event_name: 'Added to Cart', from: fromD, to: toD,
+  });
+  if (!exportInit.cursor) return res.json({ error: exportInit });
+
+  let totalEvents = 0;
+  let noTitle = 0;
+  const allTitles = [];
+  let cursor = exportInit.cursor;
+  while (cursor) {
+    const page = await ctRequest('GET', `/1/events.json?cursor=${cursor}`);
+    for (const rec of (page.records || [])) {
+      totalEvents++;
+      const title = rec.event_props?.title || rec.event_props?.Title || '';
+      if (!title) { noTitle++; continue; }
+      allTitles.push(title);
+    }
+    cursor = page.cursor || null;
+  }
+
+  const unmatchedCounts = {};
+  for (const rawTitle of allTitles) {
+    const matched = PRODUCT_ENTRIES.some(({ key }) =>
+      rawTitle.toLowerCase().includes(key.replace(/&/g, '&amp;').toLowerCase())
+    );
+    if (!matched) unmatchedCounts[rawTitle] = (unmatchedCounts[rawTitle] || 0) + 1;
+  }
+
+  const sorted = Object.entries(unmatchedCounts).sort((a, b) => b[1] - a[1]).map(([title, count]) => ({ title, count }));
+  const noTitleList = noTitle ? [`(${noTitle} events had no title property)`] : [];
+
+  res.json({ from, to, totalExported: totalEvents, noTitleCount: noTitle,
+    unmappedTitleCount: sorted.reduce((s, x) => s + x.count, 0),
+    note: 'Other = noTitle + unmappedTitles. CT query-based Other may differ slightly due to &amp; encoding in CT.',
+    unmapped: [...noTitleList, ...sorted.map(x => `${x.title} (${x.count})`)] });
+});
+
+// ── Profile-filter debug ─────────────────────────────────────────────────
+
+app.get('/api/debug-profile-export', async (req, res) => {
+  const date = req.query.date || istDate(1);
+  const d    = parseInt(date.replace(/-/g, ''), 10);
+
+  // Test: does /1/profiles.json honour profile_filters + event_filters?
+  // Try different request formats to see what CT's profiles API actually accepts
+  async function ctProfileRaw(body) {
+    try {
+      const init = await ctRequest('POST', '/1/profiles.json', body);
+      if (init.cursor) {
+        const page = await ctRequest('GET', `/1/profiles.json?cursor=${init.cursor}`);
+        return { init_status: init.status, page_count: (page.records||[]).length, page_total: page.count, first_record_keys: Object.keys((page.records||[{}])[0]||{}) };
+      }
+      return { init };
+    } catch (e) { return { error: e.message }; }
+  }
+
+  // Get a full sample record to see the structure
+  async function ctProfileSample(body) {
+    try {
+      const init = await ctRequest('POST', '/1/profiles.json', body);
+      if (init.cursor) {
+        const page = await ctRequest('GET', `/1/profiles.json?cursor=${init.cursor}`);
+        return { total_records: (page.records||[]).length, sample: (page.records||[])[0] };
+      }
+      return { init };
+    } catch (e) { return { error: e.message }; }
+  }
+
+  const sample = await ctProfileSample({ event_name: 'App Launched', from: d, to: d });
+  res.json({ date, sample });
+});
+
+app.get('/api/debug-profile-filter', async (req, res) => {
+  const date = req.query.date || istDate(1);
+  const d    = parseInt(date.replace(/-/g, ''), 10);
+
+  // Test CT profiles count API — does it support profile_filters?
+  async function ctProfileCount(profileFilters) {
+    const body = {};
+    if (profileFilters && profileFilters.length) body.profile_filters = profileFilters;
+    try {
+      const init = await ctRequest('POST', '/1/counts/profiles.json', body);
+      if (init.status === 'success') return init.count ?? init;
+      if (!init.req_id) return { raw: init };
+      const result = await ctPoll(init.req_id);
+      return result.count ?? result;
+    } catch (e) { return { error: e.message }; }
+  }
+
+  const [
+    eventUnfiltered, eventImpossible,
+    profileAll, profileOC0, profileOC1, profileOC5plus,
+  ] = await Promise.all([
+    fetchCTCountRange('App Launched', null, null, d, d),
+    fetchCTCountRange('App Launched', null,
+      [{ name: 'Orders Count', operator: 'equals', value: 999999 }], d, d),
+    ctProfileCount(null),
+    ctProfileCount([{ name: 'Orders Count', operator: 'equals',      value: 0 }]),
+    ctProfileCount([{ name: 'Orders Count', operator: 'equals',      value: 1 }]),
+    ctProfileCount([{ name: 'Orders Count', operator: 'greaterThan', value: 4 }]),
+  ]);
+
+  res.json({
+    date,
+    events_api: {
+      unfiltered:    eventUnfiltered,
+      OC_eq_999999:  eventImpossible,
+      filterWorking: eventImpossible !== eventUnfiltered,
+    },
+    profiles_api: {
+      all_users: profileAll,
+      OC_eq_0:   profileOC0,
+      OC_eq_1:   profileOC1,
+      'OC_gt_4 (5+)': profileOC5plus,
+      filterWorking: typeof profileOC0 === 'number' && profileOC0 !== profileAll,
+    },
+  });
 });
 
 // ── Env check ────────────────────────────────────────────────────────────────

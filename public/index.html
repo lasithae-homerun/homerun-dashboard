@@ -324,6 +324,7 @@
       background: #fff;
       cursor: pointer;
       height: 28px;
+      min-width: 165px;
     }
 
     .conv-date-sep { font-size: 11px; color: var(--muted); }
@@ -368,6 +369,48 @@
     thead th.col-date { text-align: left; width: 80px; }
     thead th.col-cvr  { color: var(--orange); }
 
+    /* ── Lifecycle segment table ── */
+    .seg-wrap { overflow-x: auto; }
+    .seg-table { width: 100%; border-collapse: collapse; min-width: 680px; }
+    .seg-table thead th {
+      padding: 6px 12px;
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      background: #FAFAFA;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+      text-align: right;
+    }
+    .seg-table thead th:first-child,
+    .seg-table thead th.th-left { text-align: left; }
+    .seg-table tbody td { padding: 7px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; font-size: 12px; }
+    .seg-table tbody tr:last-child td { border-bottom: none; }
+    .seg-b2c > td { background: #EEEDFE; }
+    .seg-b2b > td { background: #FAEEDA; }
+    .seg-channel { font-weight: 800; font-size: 11px; text-align: center; vertical-align: middle; }
+    .seg-channel-b2c { background: #D9D6FB !important; color: #4338CA; }
+    .seg-channel-b2b { background: #F0CFA0 !important; color: #92400E; }
+    .seg-type { font-weight: 600; white-space: nowrap; }
+    .seg-def  { color: var(--muted); font-size: 11px; white-space: nowrap; }
+    .seg-owner { color: var(--muted); font-size: 11px; }
+    .seg-num  { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .seg-power   > .seg-type,
+    .seg-power   > .seg-num  { color: #1D4ED8; }
+    .seg-churned > .seg-type,
+    .seg-churned > .seg-num  { color: #9CA3AF; }
+    .seg-overall > td        { background: #F1F5F9; font-weight: 600; border-bottom: 2px solid #E2E8F0; }
+    .seg-section-label {
+      padding: 6px 14px 2px;
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
     /* ── Pivot table ── */
     .pivot-wrapper { overflow-x: auto; }
     .pivot-wrapper table { min-width: max-content; }
@@ -380,6 +423,24 @@
     .pivot-wrapper tbody td:first-child  { position: sticky; left: 0; background: #fff; z-index: 1; }
     .pivot-wrapper tbody tr:hover td     { background: #FAFAFA; }
     .pivot-wrapper tbody tr:hover td:first-child { background: #FAFAFA; }
+
+    /* ── Info tooltip ──────────────────────────────────── */
+    .info-tip {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 13px; height: 13px; border-radius: 50%;
+      background: #E5E7EB; color: #6B7280;
+      font-size: 8px; font-weight: 700; font-style: normal;
+      cursor: help; margin-left: 4px; vertical-align: middle;
+      flex-shrink: 0; user-select: none; line-height: 1;
+    }
+    .info-tip:hover { background: #6366F1; color: #fff; }
+    #tooltip-box {
+      display: none; position: fixed; z-index: 9999;
+      background: #1F2937; color: #F9FAFB;
+      font-size: 12px; line-height: 1.6; padding: 9px 13px;
+      border-radius: 7px; max-width: 300px; pointer-events: none;
+      white-space: pre-line; box-shadow: 0 4px 16px rgba(0,0,0,.25);
+    }
   </style>
   <!-- SheetJS for client-side Excel export -->
   <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
@@ -407,6 +468,7 @@
 <div class="tabbar">
   <button class="tab-btn active" id="tab-conversion" onclick="switchTab('conversion')">Conversion</button>
   <button class="tab-btn" id="tab-atc" onclick="switchTab('atc')">Added to Cart</button>
+  <button class="tab-btn" id="tab-lifecycle" onclick="switchTab('lifecycle')">Lifecycle Segments</button>
   <button class="tab-btn" id="tab-segments" onclick="switchTab('segments')">Orders Segment</button>
 </div>
 
@@ -421,9 +483,9 @@
 
     <!-- Date range toolbar -->
     <div class="conv-toolbar">
-      <input type="date" id="convFrom" class="date-input">
+      <input type="datetime-local" id="convFrom" class="date-input">
       <span class="conv-date-sep">to</span>
-      <input type="date" id="convTo" class="date-input">
+      <input type="datetime-local" id="convTo" class="date-input">
       <button class="btn btn-primary btn-sm" id="convLoadBtn" onclick="loadConversion()">Load</button>
     </div>
 
@@ -455,9 +517,9 @@
   <div class="tab-panel" id="panel-atc">
 
     <div class="conv-toolbar">
-      <input type="date" id="atcFrom" class="date-input">
+      <input type="datetime-local" id="atcFrom" class="date-input">
       <span class="conv-date-sep">to</span>
-      <input type="date" id="atcTo" class="date-input">
+      <input type="datetime-local" id="atcTo" class="date-input">
       <button class="btn btn-primary btn-sm" id="atcLoadBtn" onclick="loadATC()">Load</button>
     </div>
 
@@ -485,6 +547,68 @@
 
   </div><!-- /panel-atc -->
 
+  <!-- ── Tab: Lifecycle Segments ── -->
+  <div class="tab-panel" id="panel-lifecycle">
+
+    <div class="conv-toolbar">
+      <input type="datetime-local" id="lcFrom" class="date-input">
+      <span class="conv-date-sep">to</span>
+      <input type="datetime-local" id="lcTo" class="date-input">
+      <button class="btn btn-primary btn-sm" id="lcLoadBtn" onclick="loadLifecycle()">Load</button>
+    </div>
+
+    <!-- Conversion Funnel -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-icon icon-blue">🔁</div>
+        <div class="card-title">Conversion Funnel — Unique Users per Segment</div>
+      </div>
+      <div class="seg-wrap">
+        <table class="seg-table">
+          <thead>
+            <tr>
+              <th class="th-left" style="width:140px">User Type</th>
+              <th class="th-left" style="width:210px">Definition</th>
+              <th>App Open<i class="info-tip" onmouseenter="showTip(event,'lcAppOpen')" onmouseleave="hideTip()">i</i></th>
+              <th>Search<i class="info-tip" onmouseenter="showTip(event,'lcSearch')" onmouseleave="hideTip()">i</i></th>
+              <th>Add to Cart<i class="info-tip" onmouseenter="showTip(event,'lcAtc')" onmouseleave="hideTip()">i</i></th>
+              <th>Order Placed<i class="info-tip" onmouseenter="showTip(event,'lcOrderPlaced')" onmouseleave="hideTip()">i</i></th>
+            </tr>
+          </thead>
+          <tbody id="lcConvBody">
+            <tr><td colspan="6" class="conv-empty">Select a date range and click Load</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Basket Analysis -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-icon icon-orange">🛒</div>
+        <div class="card-title">Basket Analysis — per Segment</div>
+      </div>
+      <div class="seg-wrap">
+        <table class="seg-table">
+          <thead>
+            <tr>
+              <th class="th-left" style="width:140px">User Type</th>
+              <th class="th-left" style="width:210px">Definition</th>
+              <th>App Open<i class="info-tip" onmouseenter="showTip(event,'lcAppOpen')" onmouseleave="hideTip()">i</i></th>
+              <th>Unique SKUs<i class="info-tip" onmouseenter="showTip(event,'lcUniqueSkus')" onmouseleave="hideTip()">i</i></th>
+              <th>Qty / SKU<i class="info-tip" onmouseenter="showTip(event,'lcQtyPerSku')" onmouseleave="hideTip()">i</i></th>
+              <th>AOV (₹)<i class="info-tip" onmouseenter="showTip(event,'lcAov')" onmouseleave="hideTip()">i</i></th>
+            </tr>
+          </thead>
+          <tbody id="lcBasketBody">
+            <tr><td colspan="6" class="conv-empty">Select a date range and click Load</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div><!-- /panel-lifecycle -->
+
   <!-- ── Tab: Orders Segment ── -->
   <div class="tab-panel" id="panel-segments">
 
@@ -504,9 +628,9 @@
           </tr>
         </thead>
         <tbody id="tbOrders">
-          <tr><td>Total Orders</td><td class="td-d1"><span class="skel"></span></td><td><span class="skel"></span></td><td><span class="skel"></span></td></tr>
-          <tr><td>New Customer Orders</td><td class="td-d1"><span class="skel"></span></td><td><span class="skel"></span></td><td><span class="skel"></span></td></tr>
-          <tr><td>Returning Customer Orders</td><td class="td-d1"><span class="skel"></span></td><td><span class="skel"></span></td><td><span class="skel"></span></td></tr>
+          <tr><td>Total Orders<i class="info-tip" onmouseenter="showTip(event,'totalOrders')" onmouseleave="hideTip()">i</i></td><td class="td-d1"><span class="skel"></span></td><td><span class="skel"></span></td><td><span class="skel"></span></td></tr>
+          <tr><td>New Customer Orders<i class="info-tip" onmouseenter="showTip(event,'newCustomer')" onmouseleave="hideTip()">i</i></td><td class="td-d1"><span class="skel"></span></td><td><span class="skel"></span></td><td><span class="skel"></span></td></tr>
+          <tr><td>Returning Customer Orders<i class="info-tip" onmouseenter="showTip(event,'returningCustomer')" onmouseleave="hideTip()">i</i></td><td class="td-d1"><span class="skel"></span></td><td><span class="skel"></span></td><td><span class="skel"></span></td></tr>
         </tbody>
       </table>
     </div>
@@ -527,11 +651,11 @@
           </tr>
         </thead>
         <tbody id="tbBulk">
-          <tr><td>Total Bulk Orders</td><td class="td-d1"><span class="skel"></span></td><td><span class="skel"></span></td><td><span class="skel"></span></td></tr>
-          <tr><td>First-Time Bulk</td><td class="td-d1"><span class="skel"></span></td><td><span class="skel"></span></td><td><span class="skel"></span></td></tr>
-          <tr><td>Repeat Bulk</td><td class="td-d1"><span class="skel"></span></td><td><span class="skel"></span></td><td><span class="skel"></span></td></tr>
-          <tr><td>B2B Bulk</td><td class="td-d1"><span class="skel"></span></td><td><span class="skel"></span></td><td><span class="skel"></span></td></tr>
-          <tr><td>B2C Bulk</td><td class="td-d1"><span class="skel"></span></td><td><span class="skel"></span></td><td><span class="skel"></span></td></tr>
+          <tr><td>Total Bulk Orders<i class="info-tip" onmouseenter="showTip(event,'bulkDef')" onmouseleave="hideTip()">i</i></td><td class="td-d1"><span class="skel"></span></td><td><span class="skel"></span></td><td><span class="skel"></span></td></tr>
+          <tr><td>First-Time Bulk<i class="info-tip" onmouseenter="showTip(event,'firstTimeBulk')" onmouseleave="hideTip()">i</i></td><td class="td-d1"><span class="skel"></span></td><td><span class="skel"></span></td><td><span class="skel"></span></td></tr>
+          <tr><td>Repeat Bulk<i class="info-tip" onmouseenter="showTip(event,'repeatBulk')" onmouseleave="hideTip()">i</i></td><td class="td-d1"><span class="skel"></span></td><td><span class="skel"></span></td><td><span class="skel"></span></td></tr>
+          <tr><td>B2B Bulk<i class="info-tip" onmouseenter="showTip(event,'b2bDef')" onmouseleave="hideTip()">i</i></td><td class="td-d1"><span class="skel"></span></td><td><span class="skel"></span></td><td><span class="skel"></span></td></tr>
+          <tr><td>B2C Bulk<i class="info-tip" onmouseenter="showTip(event,'b2cDef')" onmouseleave="hideTip()">i</i></td><td class="td-d1"><span class="skel"></span></td><td><span class="skel"></span></td><td><span class="skel"></span></td></tr>
         </tbody>
       </table>
     </div>
@@ -552,10 +676,10 @@
           </tr>
         </thead>
         <tbody id="tbSegments">
-          <tr><td>B2B Orders</td><td class="td-d1"><span class="skel"></span></td><td><span class="skel"></span></td><td><span class="skel"></span></td></tr>
-          <tr><td>B2C Orders</td><td class="td-d1"><span class="skel"></span></td><td><span class="skel"></span></td><td><span class="skel"></span></td></tr>
-          <tr><td>B2B New Customers Ordered</td><td class="td-d1"><span class="skel"></span></td><td><span class="skel"></span></td><td><span class="skel"></span></td></tr>
-          <tr><td>B2C New Customers Ordered</td><td class="td-d1"><span class="skel"></span></td><td><span class="skel"></span></td><td><span class="skel"></span></td></tr>
+          <tr><td>B2B Orders<i class="info-tip" onmouseenter="showTip(event,'b2bDef')" onmouseleave="hideTip()">i</i></td><td class="td-d1"><span class="skel"></span></td><td><span class="skel"></span></td><td><span class="skel"></span></td></tr>
+          <tr><td>B2C Orders<i class="info-tip" onmouseenter="showTip(event,'b2cDef')" onmouseleave="hideTip()">i</i></td><td class="td-d1"><span class="skel"></span></td><td><span class="skel"></span></td><td><span class="skel"></span></td></tr>
+          <tr><td>B2B New Customers Ordered<i class="info-tip" onmouseenter="showTip(event,'b2bDef')" onmouseleave="hideTip()">i</i></td><td class="td-d1"><span class="skel"></span></td><td><span class="skel"></span></td><td><span class="skel"></span></td></tr>
+          <tr><td>B2C New Customers Ordered<i class="info-tip" onmouseenter="showTip(event,'b2cDef')" onmouseleave="hideTip()">i</i></td><td class="td-d1"><span class="skel"></span></td><td><span class="skel"></span></td><td><span class="skel"></span></td></tr>
         </tbody>
       </table>
     </div>
@@ -565,10 +689,24 @@
 </div>
 
 <script>
-  let lastData        = null;
-  let lastConvData    = null;
-  let lastProductData = null;
-  let activeTab       = 'conversion';
+  let lastData          = null;
+  let lastConvData      = null;
+  let lastProductData   = null;
+  let lastLifecycleData = null;
+  let activeTab         = 'conversion';
+
+  const LC_SEGS = [
+    { key:'overall', label:'Overall',         def:'All users (no filter)',    cls:'seg-overall', tip:'lcSegOverall' },
+    { key:'new',     label:'New',             def:'OC = 0',                  cls:'',            tip:'lcSegNew'     },
+    { key:'early',   label:'Early Lifecycle', def:'OC 1–2, charged ≤60d',    cls:'',            tip:'lcSegEarly'   },
+    { key:'active',  label:'Active',          def:'OC 3–9, charged ≤60d',    cls:'',            tip:'lcSegActive'  },
+    { key:'power',   label:'Power',           def:'OC 10+, charged ≤60d',    cls:'seg-power',   tip:'lcSegPower'   },
+    { key:'churned', label:'Churned',         def:'No charge in 60d',        cls:'seg-churned', tip:'lcSegChurned' },
+  ];
+
+  function tipIcon(key) {
+    return `<i class="info-tip" onmouseenter="showTip(event,'${key}')" onmouseleave="hideTip()">i</i>`;
+  }
 
   function switchTab(tab) {
     activeTab = tab;
@@ -577,9 +715,10 @@
     document.getElementById('tab-' + tab).classList.add('active');
     document.getElementById('panel-' + tab).classList.add('active');
     const exportBtn = document.getElementById('exportBtn');
-    if (tab === 'conversion')  exportBtn.disabled = !lastConvData;
-    else if (tab === 'atc')    exportBtn.disabled = !lastProductData;
-    else                       exportBtn.disabled = !lastData;
+    if (tab === 'conversion')     exportBtn.disabled = !lastConvData;
+    else if (tab === 'atc')       exportBtn.disabled = !lastProductData;
+    else if (tab === 'lifecycle') exportBtn.disabled = !lastLifecycleData;
+    else                          exportBtn.disabled = !lastData;
   }
 
   function fmtDate(iso) {
@@ -609,8 +748,8 @@
 
   function renderTable(tbodyId, rows, m) {
     const tbody = document.getElementById(tbodyId);
-    tbody.innerHTML = rows.map(([label, key]) => `<tr>
-      <td>${label}</td>
+    tbody.innerHTML = rows.map(([label, key, tipKey]) => `<tr>
+      <td>${label}${tipKey ? tipIcon(tipKey) : ''}</td>
       ${cell(m.d1, key, m.d2, true)}
       ${cell(m.d2, key, null)}
       ${cell(m.d7, key, null)}
@@ -636,24 +775,24 @@
     const m = data.metrics;
 
     renderTable('tbOrders', [
-      ['Total Orders',              'totalOrders'],
-      ['New Customer Orders',       'newCustomerOrders'],
-      ['Returning Customer Orders', 'returningCustomerOrders'],
+      ['Total Orders',              'totalOrders',              'totalOrders'],
+      ['New Customer Orders',       'newCustomerOrders',        'newCustomer'],
+      ['Returning Customer Orders', 'returningCustomerOrders',  'returningCustomer'],
     ], m);
 
     renderTable('tbSegments', [
-      ['B2B Orders',                'b2bOrders'],
-      ['B2C Orders',                'b2cOrders'],
-      ['B2B New Customers Ordered', 'b2bNewCustomers'],
-      ['B2C New Customers Ordered', 'b2cNewCustomers'],
+      ['B2B Orders',                'b2bOrders',      'b2bDef'],
+      ['B2C Orders',                'b2cOrders',      'b2cDef'],
+      ['B2B New Customers Ordered', 'b2bNewCustomers','b2bDef'],
+      ['B2C New Customers Ordered', 'b2cNewCustomers','b2cDef'],
     ], m);
 
     renderTable('tbBulk', [
-      ['Total Bulk Orders', 'totalBulkOrders'],
-      ['First-Time Bulk',   'firstTimeBulk'],
-      ['Repeat Bulk',       'repeatBulk'],
-      ['B2B Bulk',          'b2bBulk'],
-      ['B2C Bulk',          'b2cBulk'],
+      ['Total Bulk Orders', 'totalBulkOrders', 'bulkDef'],
+      ['First-Time Bulk',   'firstTimeBulk',   'firstTimeBulk'],
+      ['Repeat Bulk',       'repeatBulk',      'repeatBulk'],
+      ['B2B Bulk',          'b2bBulk',         'b2bDef'],
+      ['B2C Bulk',          'b2cBulk',         'b2cDef'],
     ], m);
 
     const at = new Date(data.fetchedAt);
@@ -688,9 +827,11 @@
   }
 
   function exportToExcel() {
-    if (activeTab === 'conversion')  exportConversionTab();
-    else if (activeTab === 'atc')    exportATCTab();
-    else                             exportOrdersTab();
+    if (activeTab === 'conversion')    exportConversionTab();
+    else if (activeTab === 'atc')      exportATCTab();
+    else if (activeTab === 'usersegs') exportUserSegsTab();
+    else if (activeTab === 'lifecycle') exportLifecycleTab();
+    else                               exportOrdersTab();
   }
 
   function exportATCTab() {
@@ -699,18 +840,25 @@
     const wb = XLSX.utils.book_new();
 
     const makeSheet = (rows) => {
-      const header  = ['Date', ...categories];
-      const data    = [header, ...rows.map(r => [fmtDate(r.date), ...categories.map(c => r[c] || 0)])];
-      const totals  = ['Total', ...categories.map(c => rows.reduce((s, r) => s + (r[c] || 0), 0))];
-      data.push(totals);
-      const ws = XLSX.utils.aoa_to_sheet(data);
-      ws['!cols'] = [{ wch: 12 }, ...categories.map(() => ({ wch: 22 }))];
+      const dates      = rows.map(r => r.date);
+      const header     = ['Category', ...dates.map(fmtDate)];
+      const dataRows   = categories.map(cat => {
+        const vals = dates.map(d => { const row = rows.find(r => r.date === d); return (row && row[cat]) || 0; });
+        return [cat, ...vals];
+      });
+      const dateTotals = dates.map(d => {
+        const row = rows.find(r => r.date === d);
+        return categories.reduce((s, cat) => s + ((row && row[cat]) || 0), 0);
+      });
+      const totalsRow  = ['Total', ...dateTotals];
+      const ws = XLSX.utils.aoa_to_sheet([header, ...dataRows, totalsRow]);
+      ws['!cols'] = [{ wch: 24 }, ...dates.map(() => ({ wch: 12 }))];
       return ws;
     };
 
     XLSX.utils.book_append_sheet(wb, makeSheet(app), 'App - Added to Cart');
     XLSX.utils.book_append_sheet(wb, makeSheet(web), 'Web - Added to Cart');
-    const from = document.getElementById('atcFrom').value || 'export';
+    const from = (document.getElementById('atcFrom').value || 'export').slice(0, 10);
     XLSX.writeFile(wb, `homerun_added_to_cart_${from}.xlsx`);
   }
 
@@ -738,7 +886,7 @@
     wsApp['!cols'] = [{ wch: 12 }, { wch: 16 }, { wch: 16 }, { wch: 14 }, { wch: 16 }, { wch: 10 }];
     XLSX.utils.book_append_sheet(wb, wsApp, 'App Funnel');
 
-    const from = document.getElementById('convFrom').value || 'export';
+    const from = (document.getElementById('convFrom').value || 'export').slice(0, 10);
     XLSX.writeFile(wb, `homerun_conversion_${from}.xlsx`);
   }
 
@@ -782,29 +930,43 @@
     XLSX.writeFile(wb, `homerun_orders_${d.d1}.xlsx`);
   }
 
-  function renderProductPivot(wrapperId, rows, categories) {
-    if (!rows || rows.length === 0) {
+  function renderProductPivot(wrapperId, rows, categories, skusOrdered, catTipKey, skuTipKey) {
+    if (!rows || rows.length === 0 || !categories || categories.length === 0) {
       document.getElementById(wrapperId).innerHTML =
         '<div class="conv-empty">No data found for this range</div>';
       return;
     }
-    const thCols = categories.map(c => `<th>${c}</th>`).join('');
-    const thead  = `<thead><tr><th>Date</th>${thCols}</tr></thead>`;
 
-    const bodyRows = rows.map(row => {
-      const tds = categories.map(cat => {
-        const v = row[cat] || 0;
+    const dates    = rows.map(r => r.date);
+    const dateCols = dates.map(d => `<th>${fmtDate(d)}</th>`).join('');
+    const skuCol   = skusOrdered ? `<th style="white-space:nowrap;background:#F5F3FF;color:#4338CA">SKUs Ordered${skuTipKey ? tipIcon(skuTipKey) : ''}</th>` : '';
+    const catTip   = catTipKey ? tipIcon(catTipKey) : '';
+    const thead    = `<thead><tr><th>Category${catTip}</th>${dateCols}${skuCol}</tr></thead>`;
+
+    const bodyRows = categories.map(cat => {
+      const dateCells = dates.map(d => {
+        const row = rows.find(r => r.date === d);
+        const v   = (row && row[cat]) || 0;
         return `<td style="text-align:right">${v > 0 ? `<span class="val-secondary">${v.toLocaleString()}</span>` : '<span style="color:var(--border)">—</span>'}</td>`;
       }).join('');
-      return `<tr><td style="color:var(--muted);font-size:12px;font-weight:500;white-space:nowrap;padding:8px 14px">${fmtDate(row.date)}</td>${tds}</tr>`;
+      const skuCell = skusOrdered
+        ? `<td style="text-align:right;background:#F5F3FF;font-weight:600;color:#4338CA;white-space:nowrap">${skusOrdered[cat] ? skusOrdered[cat] : '<span style="color:var(--border)">—</span>'}</td>`
+        : '';
+      return `<tr><td style="color:var(--muted);font-size:12px;font-weight:500;white-space:nowrap;padding:8px 14px">${cat}</td>${dateCells}${skuCell}</tr>`;
     }).join('');
 
-    // Totals footer
-    const footTds = categories.map(cat => {
-      const total = rows.reduce((s, r) => s + (r[cat] || 0), 0);
+    const footDateTds = dates.map(d => {
+      const row   = rows.find(r => r.date === d);
+      const total = categories.reduce((s, cat) => s + ((row && row[cat]) || 0), 0);
       return `<td style="text-align:right;font-weight:700;font-size:12px;padding:6px 14px;border-top:2px solid var(--border)">${total > 0 ? total.toLocaleString() : '—'}</td>`;
     }).join('');
-    const tfoot = `<tfoot><tr><td style="font-weight:700;font-size:12px;padding:6px 14px;border-top:2px solid var(--border)">Total</td>${footTds}</tr></tfoot>`;
+    const skuFootCell = skusOrdered
+      ? `<td style="text-align:right;font-weight:700;font-size:12px;padding:6px 14px;border-top:2px solid var(--border);background:#F5F3FF;color:#4338CA">${Object.values(skusOrdered).reduce((s,v)=>s+v,0)}</td>`
+      : '';
+    const tfoot = `<tfoot><tr>
+      <td style="font-weight:700;font-size:12px;padding:6px 14px;border-top:2px solid var(--border)">Total</td>
+      ${footDateTds}${skuFootCell}
+    </tr></tfoot>`;
 
     document.getElementById(wrapperId).innerHTML =
       `<table><thead>${thead}</thead><tbody>${bodyRows}</tbody>${tfoot}</table>`;
@@ -813,6 +975,8 @@
   loadMetrics();
   initConvDates();
   initATCDates();
+  initLifecycleDates();
+  loadConversion();
 
   // ── Conversion funnel ────────────────────────────────────────────────────────
 
@@ -823,13 +987,13 @@
   }
 
   function initConvDates() {
-    document.getElementById('convFrom').value = istYMD(7);
-    document.getElementById('convTo').value   = istYMD(1);
+    document.getElementById('convFrom').value = istYMD(1) + 'T00:00';
+    document.getElementById('convTo').value   = istYMD(1) + 'T23:59';
   }
 
   function initATCDates() {
-    document.getElementById('atcFrom').value = istYMD(7);
-    document.getElementById('atcTo').value   = istYMD(1);
+    document.getElementById('atcFrom').value = istYMD(1) + 'T00:00';
+    document.getElementById('atcTo').value   = istYMD(1) + 'T23:59';
   }
 
   async function loadATC() {
@@ -850,8 +1014,8 @@
       if (!pj.success) throw new Error(pj.error);
       lastProductData = pj;
       document.getElementById('exportBtn').disabled = false;
-      renderProductPivot('appProductsWrapper', pj.app, pj.categories);
-      renderProductPivot('webProductsWrapper', pj.web, pj.categories);
+      renderProductPivot('appProductsWrapper', pj.app, pj.categories, pj.appSkusOrdered, 'atcAppCat', 'atcAppSkus');
+      renderProductPivot('webProductsWrapper', pj.web, pj.categories, pj.webSkusOrdered, 'atcWebCat', 'atcWebSkus');
     } catch (e) {
       const msg = `<div class="conv-empty" style="color:var(--red)">Error: ${e.message}</div>`;
       document.getElementById('appProductsWrapper').innerHTML = msg;
@@ -887,7 +1051,7 @@
   }
 
   function buildFunnelTable(data, funnelKey, steps) {
-    const thCols = steps.map(s => `<th>${s.label}</th>`).join('') + '<th class="col-cvr">CVR</th>';
+    const thCols = steps.map(s => `<th>${s.label}${s.tip ? tipIcon(s.tip) : ''}</th>`).join('') + '<th class="col-cvr">CVR</th>';
     const thead  = `<thead><tr><th class="col-date">Date</th>${thCols}</tr></thead>`;
 
     const rows = data.map(d => {
@@ -901,6 +1065,194 @@
     }).join('');
 
     return `<table><thead>${thead}</thead><tbody>${rows}</tbody></table>`;
+  }
+
+  function initUserSegsDates() {
+    document.getElementById('usegsFrom').value = istYMD(1) + 'T00:00';
+    document.getElementById('usegsTo').value   = istYMD(1) + 'T23:59';
+  }
+
+  function renderUserSegsTable(wrapperId, rows) {
+    const OC_LABELS = ['OC=0', 'OC=1', 'OC=2', 'OC=3', 'OC=4', 'OC=5+'];
+    const thead = `<thead><tr>
+      <th>Order Count</th>
+      <th style="text-align:right">App Launched</th>
+      <th style="text-align:right">ATC</th>
+      <th style="text-align:right">Order Placed</th>
+    </tr></thead>`;
+
+    const bodyRows = OC_LABELS.map(label => {
+      const r = rows.find(x => x.oc === label) || {};
+      const fmt = v => v !== null && v !== undefined ? `<span class="val-secondary">${v.toLocaleString()}</span>` : '<span style="color:var(--border)">—</span>';
+      return `<tr>
+        <td style="font-weight:600;padding:8px 14px">${label}</td>
+        <td style="text-align:right;padding:8px 14px">${fmt(r.appLaunched)}</td>
+        <td style="text-align:right;padding:8px 14px">${fmt(r.atc)}</td>
+        <td style="text-align:right;padding:8px 14px">${fmt(r.orderPlaced)}</td>
+      </tr>`;
+    }).join('');
+
+    document.getElementById(wrapperId).innerHTML =
+      `<table><thead>${thead}</thead><tbody>${bodyRows}</tbody></table>`;
+  }
+
+  async function loadUserSegs() {
+    const from = document.getElementById('usegsFrom').value;
+    const to   = document.getElementById('usegsTo').value;
+    if (!from || !to) return;
+
+    const btn = document.getElementById('usegsLoadBtn');
+    btn.innerHTML = '<span class="spin">⟳</span>';
+    btn.disabled  = true;
+
+    const loading = '<div class="conv-loading"><span class="spin">⟳</span> Loading…</div>';
+    document.getElementById('activeSegsWrapper').innerHTML  = loading;
+    document.getElementById('churnedSegsWrapper').innerHTML = loading;
+
+    try {
+      const res  = await fetch(`/api/user-segments?from=${from}&to=${to}`);
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error);
+
+      lastUserSegsData = json;
+      document.getElementById('exportBtn').disabled = false;
+      renderUserSegsTable('activeSegsWrapper',  json.active);
+      renderUserSegsTable('churnedSegsWrapper', json.churned);
+    } catch (e) {
+      const msg = `<div class="conv-empty" style="color:var(--red)">Error: ${e.message}</div>`;
+      document.getElementById('activeSegsWrapper').innerHTML  = msg;
+      document.getElementById('churnedSegsWrapper').innerHTML = msg;
+    } finally {
+      btn.innerHTML = 'Load';
+      btn.disabled  = false;
+    }
+  }
+
+  function exportUserSegsTab() {
+    if (!lastUserSegsData) return;
+    const { active, churned } = lastUserSegsData;
+    const OC_LABELS = ['OC=0', 'OC=1', 'OC=2', 'OC=3', 'OC=4', 'OC=5+'];
+
+    const makeSheet = (rows) => {
+      const header = ['Order Count', 'App Launched', 'ATC', 'Order Placed'];
+      const data   = OC_LABELS.map(label => {
+        const r = rows.find(x => x.oc === label) || {};
+        return [label, r.appLaunched ?? '', r.atc ?? '', r.orderPlaced ?? ''];
+      });
+      const ws = XLSX.utils.aoa_to_sheet([header, ...data]);
+      ws['!cols'] = [{ wch: 14 }, { wch: 16 }, { wch: 14 }, { wch: 16 }];
+      return ws;
+    };
+
+    const wb   = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, makeSheet(active),  'Active Users');
+    XLSX.utils.book_append_sheet(wb, makeSheet(churned), 'Churned Users');
+    const from = (document.getElementById('usegsFrom').value || 'export').slice(0, 10);
+    XLSX.writeFile(wb, `homerun_user_segments_${from}.xlsx`);
+  }
+
+  // ── Lifecycle Segments ──────────────────────────────────────────────────────
+
+  function initLifecycleDates() {
+    document.getElementById('lcFrom').value = istYMD(1) + 'T00:00';
+    document.getElementById('lcTo').value   = istYMD(1) + 'T23:59';
+  }
+
+  function lcNum(v, fmt) {
+    if (v === null || v === undefined) return '<span style="color:var(--border)">—</span>';
+    return `<span class="val-secondary">${fmt ? fmt(v) : v.toLocaleString()}</span>`;
+  }
+
+  function renderLifecycleBody(tbodyId, data, metrics) {
+    const tbody = document.getElementById(tbodyId);
+    tbody.innerHTML = LC_SEGS.map(seg => {
+      const rowData   = data[seg.key] || {};
+      const metricTds = metrics.map(m =>
+        `<td class="seg-num">${lcNum(rowData[m.key], m.fmt)}</td>`
+      ).join('');
+      return `<tr class="${seg.cls}">
+        <td class="seg-type">${seg.label}${tipIcon(seg.tip)}</td>
+        <td class="seg-def">${seg.def}</td>
+        ${metricTds}
+      </tr>`;
+    }).join('');
+  }
+
+  async function loadLifecycle() {
+    const from = document.getElementById('lcFrom').value;
+    const to   = document.getElementById('lcTo').value;
+    if (!from || !to) return;
+
+    const btn = document.getElementById('lcLoadBtn');
+    btn.innerHTML = '<span class="spin">⟳</span>';
+    btn.disabled  = true;
+
+    const loading = '<tr><td colspan="6" class="conv-loading"><span class="spin">⟳</span> Loading — this may take 2–3 minutes…</td></tr>';
+    document.getElementById('lcConvBody').innerHTML   = loading;
+    document.getElementById('lcBasketBody').innerHTML = loading;
+
+    try {
+      const res  = await fetch(`/api/lifecycle-segments?from=${from}&to=${to}`);
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error);
+
+      lastLifecycleData = json;
+      document.getElementById('exportBtn').disabled = false;
+
+      const convMetrics = [
+        { key: 'appOpen',      label: 'App Open' },
+        { key: 'search',       label: 'Search' },
+        { key: 'atc',          label: 'Add to Cart' },
+        { key: 'orderPlaced',  label: 'Order Placed' },
+      ];
+      const basketMetrics = [
+        { key: 'appOpen',    label: 'App Open' },
+        { key: 'uniqueSkus', label: 'Unique SKUs' },
+        { key: 'avgQty',     label: 'Qty / SKU', fmt: v => v.toFixed(1) },
+        { key: 'aov',        label: 'AOV (₹)',   fmt: v => `₹${v.toLocaleString('en-IN', { minimumFractionDigits:2, maximumFractionDigits:2 })}` },
+      ];
+
+      renderLifecycleBody('lcConvBody',   json.conversion, convMetrics);
+      renderLifecycleBody('lcBasketBody', json.basket,     basketMetrics);
+
+    } catch (e) {
+      const msg = `<tr><td colspan="6" class="conv-empty" style="color:var(--red)">Error: ${e.message}</td></tr>`;
+      document.getElementById('lcConvBody').innerHTML   = msg;
+      document.getElementById('lcBasketBody').innerHTML = msg;
+    } finally {
+      btn.innerHTML = 'Load';
+      btn.disabled  = false;
+    }
+  }
+
+  function exportLifecycleTab() {
+    if (!lastLifecycleData) return;
+    const { conversion, basket } = lastLifecycleData;
+    const wb = XLSX.utils.book_new();
+
+    const makeSheet = (data, cols) => {
+      const header = ['User Type', 'Definition', ...cols.map(c => c.label)];
+      const rows   = LC_SEGS.map(seg => {
+        const d = data[seg.key] || {};
+        return [seg.label, seg.def, ...cols.map(c => d[c.key] ?? '')];
+      });
+      const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
+      ws['!cols'] = [{ wch:18 }, { wch:24 }, ...cols.map(() => ({ wch:14 }))];
+      return ws;
+    };
+
+    XLSX.utils.book_append_sheet(wb, makeSheet(conversion, [
+      { key:'appOpen', label:'App Open' }, { key:'search', label:'Search' },
+      { key:'atc', label:'Add to Cart' }, { key:'orderPlaced', label:'Order Placed' },
+    ]), 'Conversion Funnel');
+
+    XLSX.utils.book_append_sheet(wb, makeSheet(basket, [
+      { key:'appOpen', label:'App Open' }, { key:'uniqueSkus', label:'Unique SKUs' },
+      { key:'avgQty', label:'Qty/SKU' },   { key:'aov', label:'AOV (Rs)' },
+    ]), 'Basket Analysis');
+
+    const from = (document.getElementById('lcFrom').value || 'export').slice(0, 10);
+    XLSX.writeFile(wb, `homerun_lifecycle_${from}.xlsx`);
   }
 
   async function loadConversion() {
@@ -924,16 +1276,16 @@
       if (!json.success) throw new Error(json.error);
 
       const webSteps = [
-        { key: 'sessions',     label: 'Web Sessions'  },
-        { key: 'productAdded', label: 'Product Added'  },
-        { key: 'cartPage',     label: 'Cart Page'      },
-        { key: 'orders',       label: 'Orders (Web)'   },
+        { key: 'sessions',     label: 'Web Sessions',  tip: 'webSessions'     },
+        { key: 'productAdded', label: 'Product Added',  tip: 'webProductAdded' },
+        { key: 'cartPage',     label: 'Cart Page',      tip: 'webCartPage'     },
+        { key: 'orders',       label: 'Orders (Web)',   tip: 'webOrders'       },
       ];
       const appSteps = [
-        { key: 'launched',     label: 'App Launched'   },
-        { key: 'productAdded', label: 'Product Added'  },
-        { key: 'cartScreen',   label: 'Cart Screen'    },
-        { key: 'orders',       label: 'Orders (App)'   },
+        { key: 'launched',     label: 'App Launched',   tip: 'appLaunched'     },
+        { key: 'productAdded', label: 'Product Added',  tip: 'appProductAdded' },
+        { key: 'cartScreen',   label: 'Cart Screen',    tip: 'appCartScreen'   },
+        { key: 'orders',       label: 'Orders (App)',   tip: 'appOrders'       },
       ];
 
       lastConvData = json.data;
@@ -953,6 +1305,69 @@
       btn.disabled  = false;
     }
   }
+</script>
+
+<div id="tooltip-box"></div>
+
+<script>
+const TIPS = {
+  // ── Conversion tab ──────────────────────────────────────────────────────
+  webSessions:     "Source: CleverTap\nEvent: Web Session Started",
+  webProductAdded: "Source: CleverTap\nEvent: Added to Cart",
+  webCartPage:     "Source: CleverTap\nEvent: Page Browsed\nFilter: Title = \"Your Shopping Cart\"",
+  webOrders:       "Source: CleverTap\nEvent: Order Created\nFilter: CT Source = \"Web\"",
+  appLaunched:     "Source: CleverTap\nEvent: App Launched",
+  appProductAdded: "Source: CleverTap\nEvent: Product Added",
+  appCartScreen:   "Source: CleverTap\nEvent: Screen Loaded\nFilter: name = \"Cart\"",
+  appOrders:       "Source: CleverTap\nEvent: Order Placed",
+  // ── ATC tab ─────────────────────────────────────────────────────────────
+  atcAppCat:       "Source: CleverTap\nEvent: Product Added (app)\nExport: /1/events.json\nLookup: product_id / variant_id → Shopify → product-map.json",
+  atcWebCat:       "Source: CleverTap\nEvent: Added to Cart (web)\nExport: /1/events.json\nLookup: Product ID / Variant ID → Shopify → product-map.json",
+  atcAppSkus:      "Source: Shopify Orders API\nFilter: source_name = 296686223361 (mobile app)\nLookup: line_item.title → product-map.json",
+  atcWebSkus:      "Source: Shopify Orders API\nFilter: source_name = web (sales_channel_id: 580111)\nLookup: line_item.title → product-map.json",
+  // ── Lifecycle tab — Conversion Funnel ───────────────────────────────────
+  lcAppOpen:       "Source: CleverTap\nExport: /1/profiles.json · Event: App Launched\nFilter: profile_filters → Orders Count per segment\nEach profile = 1 unique user",
+  lcSearch:        "Source: CleverTap\nExport: /1/profiles.json · Event: Screen Loaded (name = \"Search\")\nFilter: profile_filters → Orders Count per segment",
+  lcAtc:           "Source: CleverTap\nExport: /1/profiles.json · Event: Product Added\nFilter: profile_filters → Orders Count per segment",
+  lcOrderPlaced:   "Source: CleverTap\nExport: /1/profiles.json · Event: Order Placed\nFilter: profile_filters → Orders Count per segment",
+  // ── Lifecycle tab — Basket Analysis ─────────────────────────────────────
+  lcUniqueSkus:    "Source: CleverTap\nExport: /1/events.json · Event: Product Added\nProperty: variant_id (fallback: sku, product_name)",
+  lcQtyPerSku:     "Source: CleverTap\nExport: /1/events.json · Event: Product Added\nProperty: quantity",
+  lcAov:           "Source: CleverTap\nExport: /1/events.json · Event: Charged\nProperty: Amount",
+  // ── Lifecycle segment row definitions ───────────────────────────────────
+  lcSegOverall: "No profile_filters — raw count of all users who fired each event in the date range\nUse this to verify CT is returning data",
+  lcSegNew:     "profileData.orderscount = 0\nNo recency condition",
+  lcSegEarly:   "profileData.orderscount 1–2\n+ last Charged event within 60 days of end date",
+  lcSegActive:  "profileData.orderscount 3–9\n+ last Charged event within 60 days of end date",
+  lcSegPower:   "profileData.orderscount 10+\n+ last Charged event within 60 days of end date",
+  lcSegChurned: "orderscount > 0 but no Charged event in the last 60 days",
+  // ── Orders Segment tab ───────────────────────────────────────────────────
+  totalOrders:     "Source: Shopify Orders API\nAll orders (any status) created in the date period",
+  b2bDef:          "Source: Shopify Orders API\nDetection: shipping_address.company stripped of spaces/commas must be purely alphanumeric AND contain both letters and digits",
+  b2cDef:          "Source: Shopify Orders API\nAll orders where the company field does not meet the B2B alphanumeric criteria",
+  bulkDef:         "Source: Shopify Orders API\nDetection: at least one line item has a non-empty discount_allocations array",
+  firstTimeBulk:   "Derived from bulk_price_ordered_N tags on the customer (max N = 1)",
+  repeatBulk:      "Derived from bulk_price_ordered_N tags on the customer (max N > 1)",
+  newCustomer:     "Customer's first order ever on Shopify (orders_count = 1 at time of order)",
+  returningCustomer:"Customer has placed at least one prior order (orders_count > 1)",
+};
+
+function showTip(e, key) {
+  const text = TIPS[key];
+  if (!text) return;
+  const box = document.getElementById('tooltip-box');
+  box.textContent = text;
+  box.style.display = 'block';
+  const bw = box.offsetWidth, bh = box.offsetHeight;
+  let x = e.clientX - Math.round(bw / 2);
+  let y = e.clientY - bh - 14;
+  if (x < 8) x = 8;
+  if (x + bw > window.innerWidth - 8) x = window.innerWidth - 8 - bw;
+  if (y < 8) y = e.clientY + 20;
+  box.style.left = x + 'px';
+  box.style.top  = y + 'px';
+}
+function hideTip() { document.getElementById('tooltip-box').style.display = 'none'; }
 </script>
 </body>
 </html>
