@@ -393,7 +393,7 @@
     .seg-channel { font-weight: 800; font-size: 11px; text-align: center; vertical-align: middle; }
     .seg-channel-b2c { background: #D9D6FB !important; color: #4338CA; }
     .seg-channel-b2b { background: #F0CFA0 !important; color: #92400E; }
-    .seg-type { font-weight: 600; white-space: nowrap; }
+    .seg-type { font-weight: 600; white-space: nowrap; text-align: right; }
     .seg-def  { color: var(--muted); font-size: 11px; white-space: nowrap; }
     .seg-owner { color: var(--muted); font-size: 11px; }
     .seg-num  { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -550,7 +550,7 @@
               <th class="th-left" style="width:140px">User Type</th>
               <th class="th-left" style="width:210px">Definition</th>
               <th>App Open<i class="info-tip" onmouseenter="showTip(event,'lcAppOpen')" onmouseleave="hideTip()">i</i></th>
-              <th>Unique SKUs<i class="info-tip" onmouseenter="showTip(event,'lcUniqueSkus')" onmouseleave="hideTip()">i</i></th>
+              <th>Unique SKUs Ordered<i class="info-tip" onmouseenter="showTip(event,'lcUniqueSkus')" onmouseleave="hideTip()">i</i></th>
               <th>Qty / SKU<i class="info-tip" onmouseenter="showTip(event,'lcQtyPerSku')" onmouseleave="hideTip()">i</i></th>
               <th>AOV (₹)<i class="info-tip" onmouseenter="showTip(event,'lcAov')" onmouseleave="hideTip()">i</i></th>
             </tr>
@@ -688,15 +688,15 @@
   const LC_SEGS = [
     { key:'overall',     label:'Overall',         def:'All users (no filter)',     cls:'seg-overall', channel:'',    tip:'lcSegOverall' },
     { key:'b2c_new',     label:'New',             def:'OC = 0',                   cls:'',            channel:'B2C', tip:'lcSegNew'     },
-    { key:'b2c_early',   label:'Early Lifecycle', def:'OC 1–2, charged ≤60d',     cls:'',            channel:'B2C', tip:'lcSegEarly'   },
-    { key:'b2c_active',  label:'Active',          def:'OC 3–10, charged ≤60d',    cls:'',            channel:'B2C', tip:'lcSegActive'  },
-    { key:'b2c_power',   label:'Power',           def:'OC 11+, charged ≤60d',     cls:'seg-power',   channel:'B2C', tip:'lcSegPower'   },
-    { key:'b2c_churned', label:'Churned',         def:'No charge in 60d',         cls:'seg-churned', channel:'B2C', tip:'lcSegChurned' },
-    { key:'b2b_new',     label:'New',             def:'OC = 0',                   cls:'',            channel:'B2B', tip:'lcSegNew'     },
-    { key:'b2b_early',   label:'Early Lifecycle', def:'OC 1–5, charged ≤30d',     cls:'',            channel:'B2B', tip:'lcSegEarly'   },
-    { key:'b2b_active',  label:'Active',          def:'OC 6–20, charged ≤30d',    cls:'',            channel:'B2B', tip:'lcSegActive'  },
-    { key:'b2b_power',   label:'Power',           def:'OC 21+, charged ≤30d',     cls:'seg-power',   channel:'B2B', tip:'lcSegPower'   },
-    { key:'b2b_churned', label:'Churned',         def:'No charge in 30d',         cls:'seg-churned', channel:'B2B', tip:'lcSegChurned' },
+    { key:'b2c_early',   label:'Early Lifecycle', def:'OC 1–2, charged <60d',      cls:'',            channel:'B2C', tip:'lcSegEarly'   },
+    { key:'b2c_active',  label:'Active',          def:'OC 3–10, charged <60d',     cls:'',            channel:'B2C', tip:'lcSegActive'  },
+    { key:'b2c_power',   label:'Power',           def:'OC 11+, charged <60d',      cls:'seg-power',   channel:'B2C', tip:'lcSegPower'   },
+    { key:'b2c_churned', label:'Churned',         def:'No charge in last 60d',     cls:'seg-churned', channel:'B2C', tip:'lcSegChurned' },
+    { key:'b2b_new',     label:'New',             def:'OC = 0',                    cls:'',            channel:'B2B', tip:'lcSegNew'     },
+    { key:'b2b_early',   label:'Early Lifecycle', def:'OC 1–5, charged <30d',      cls:'',            channel:'B2B', tip:'lcSegEarly'   },
+    { key:'b2b_active',  label:'Active',          def:'OC 6–20, charged <30d',     cls:'',            channel:'B2B', tip:'lcSegActive'  },
+    { key:'b2b_power',   label:'Power',           def:'OC 21+, charged <30d',      cls:'seg-power',   channel:'B2B', tip:'lcSegPower'   },
+    { key:'b2b_churned', label:'Churned',         def:'No charge in last 30d',     cls:'seg-churned', channel:'B2B', tip:'lcSegChurned' },
   ];
 
   function tipIcon(key) {
@@ -1312,9 +1312,9 @@ const TIPS = {
   lcAtc:           "Source: CleverTap\nExport: /1/profiles.json · Event: Product Added\nFilter: profile_filters → Orders Count per segment",
   lcOrderPlaced:   "Source: CleverTap\nExport: /1/profiles.json · Event: Order Placed\nFilter: profile_filters → Orders Count per segment",
   // ── Lifecycle tab — Basket Analysis ─────────────────────────────────────
-  lcUniqueSkus:    "Source: CleverTap\nExport: /1/events.json · Event: Product Added\nProperty: variant_id (fallback: sku, product_name)",
-  lcQtyPerSku:     "Source: CleverTap\nExport: /1/events.json · Event: Product Added\nProperty: quantity",
-  lcAov:           "Source: CleverTap\nExport: /1/events.json · Event: Charged\nProperty: Amount",
+  lcUniqueSkus:    "Source: Shopify\nOrders API · fields: line_items\nCount of distinct line_item.sku values across all orders in segment",
+  lcQtyPerSku:     "Source: Shopify\nOrders API · fields: line_items\nTotal quantity of all line items ÷ unique SKU count in segment",
+  lcAov:           "Source: Shopify\nOrders API · fields: total_price\nAverage order value per order in segment",
   // ── Lifecycle segment row definitions ───────────────────────────────────
   lcSegOverall: "No profile_filters — raw count of all users who fired each event in the date range\nUse this to verify CT is returning data",
   lcSegNew:     "profileData.orderscount = 0\nNo recency condition",

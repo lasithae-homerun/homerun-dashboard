@@ -85,6 +85,34 @@ async function fetchOrdersInRange(fromDate, toDate) {
   return orders;
 }
 
+async function fetchOrdersForBasket(fromDate, toDate) {
+  const min = encodeURIComponent(`${fromDate}T00:00:00+05:30`);
+  const max = encodeURIComponent(`${toDate}T23:59:59+05:30`);
+  let urlPath = `/admin/api/2024-01/orders.json?status=any&created_at_min=${min}&created_at_max=${max}&limit=250&fields=id,total_price,customer,shipping_address,line_items`;
+  const orders = [];
+  while (urlPath) {
+    const { body, link } = await shopifyGet(urlPath);
+    orders.push(...(body.orders || []));
+    urlPath = nextShopifyPath(link);
+  }
+  return orders;
+}
+
+// Shopify's embedded customer in Orders API doesn't include orders_count.
+// Fetch it separately in batches of 250 by customer ID.
+async function fetchCustomerOrderCounts(customerIds) {
+  const counts = new Map();
+  const ids = [...customerIds].filter(Boolean);
+  for (let i = 0; i < ids.length; i += 250) {
+    const batch = ids.slice(i, i + 250).join(',');
+    const { body } = await shopifyGet(`/admin/api/2024-01/customers.json?ids=${batch}&limit=250&fields=id,orders_count`);
+    for (const c of (body.customers || [])) {
+      counts.set(String(c.id), c.orders_count ?? 1);
+    }
+  }
+  return counts;
+}
+
 // ── Business logic ────────────────────────────────────────────────────────────
 
 function isB2B(order) {
@@ -741,7 +769,7 @@ function classifyLifecycleSegment(profile, b2cChurnCutoff, b2bChurnCutoff) {
   const pfx   = isB2B ? 'b2b' : 'b2c';
   const churnCutoff  = isB2B ? b2bChurnCutoff : b2cChurnCutoff;
   const lastCharged  = ctTsToUnix(ev['Charged']?.last_seen || 0);
-  const isRecent     = lastCharged >= churnCutoff;
+  const isRecent     = lastCharged > churnCutoff;
 
   if (oc === 0)  return `${pfx}_new`;
   if (!isRecent) return `${pfx}_churned`;
@@ -755,12 +783,29 @@ function classifyLifecycleSegment(profile, b2cChurnCutoff, b2bChurnCutoff) {
   return 'b2c_power';                    // OC 11+
 }
 
+// Classify a Shopify order into a lifecycle segment for basket analysis.
+// B2B via shipping_address.company; oc = customer.orders_count from Customers API.
+// orders_count includes the current order, so pastOC = oc - 1 matches CT's orderscount.
+function classifyShopifySegment(order, oc) {
+  const b2b    = isB2B(order);
+  const pastOC = oc - 1;  // orders_count includes this order; past OC = prior orders
+  if (pastOC === 0) return b2b ? 'b2b_new' : 'b2c_new';
+  if (b2b) {
+    if (pastOC <= 5)  return 'b2b_early';
+    if (pastOC <= 20) return 'b2b_active';
+    return 'b2b_power';
+  }
+  if (pastOC <= 2)  return 'b2c_early';
+  if (pastOC <= 10) return 'b2c_active';
+  return 'b2c_power';
+}
+
 app.get('/api/lifecycle-segments', async (req, res) => {
   const { from, to } = req.query;
   if (!from || !to) return res.status(400).json({ success: false, error: 'from and to required' });
 
   await ensureB2BIds();
-  const cacheKey = `lifecycle_v22_${from.slice(0, 10)}_${to.slice(0, 10)}`;
+  const cacheKey = `lifecycle_v28_${from.slice(0, 10)}_${to.slice(0, 10)}`;
   const cached   = lifecycleCache[cacheKey];
   if (cached && Date.now() - cached.ts < LIFECYCLE_TTL) {
     return res.json({ success: true, conversion: cached.conversion, basket: cached.basket, cached: true });
@@ -780,13 +825,15 @@ app.get('/api/lifecycle-segments', async (req, res) => {
       exportCTEvents('App Launched',  fromD, toD),
       exportCTEvents('Screen Loaded', fromD, toD),
     ]);
-    const [atcEvents, orderEvents] = await Promise.all([
+    const fromDateStr = from.slice(0, 10);
+    const toDateStr   = to.slice(0, 10);
+    const [atcEvents, orderEvents, shopifyOrders] = await Promise.all([
       exportCTEvents('Product Added', fromD, toD),
       exportCTEvents('Order Placed',  fromD, toD),
+      fetchOrdersForBasket(fromDateStr, toDateStr),
     ]);
-    const chargedEvents = await exportCTEvents('Charged', fromD, toD);
 
-    console.log(`[lifecycle ${fromD}-${toD}] raw events — App:${appEvents.length} Screen:${screenEvents.length} ATC:${atcEvents.length} Order:${orderEvents.length} Charged:${chargedEvents.length}`);
+    console.log(`[lifecycle ${fromD}-${toD}] raw events — App:${appEvents.length} Screen:${screenEvents.length} ATC:${atcEvents.length} Order:${orderEvents.length} ShopifyOrders:${shopifyOrders.length}`);
     console.log(`[lifecycle ${fromD}-${toD}] App events w/ profile: ${appEvents.filter(e => e.profile).length}`);
 
     // Deduplicate events to unique user profiles (one profile per user per metric)
@@ -825,8 +872,7 @@ app.get('/api/lifecycle-segments', async (req, res) => {
     countConv(atcProfiles,    'atc');
     countConv(orderProfiles,  'orderPlaced');
 
-    // ── Basket: aggregate per segment ─────────────────────────────────────
-    // Each event record embeds a full user profile, so we can classify inline.
+    // ── Basket: App Open from CT; SKUs / Qty / AOV from Shopify orders ────────
     const mkBkt = () => ({ appOpen: 0, skuSet: new Set(), qtySum: 0, qtyCount: 0, aovSum: 0, aovCount: 0 });
     const bkt   = Object.fromEntries(LC_SEG_KEYS.map(s => [s, mkBkt()]));
 
@@ -836,21 +882,25 @@ app.get('/api/lifecycle-segments', async (req, res) => {
       bkt[s].appOpen++;
     }
 
-    for (const ev of atcEvents) {
-      const s   = classifyLifecycleSegment(ev.profile, b2cChurnCutoff, b2bChurnCutoff);
-      const sku = ev.event_props?.variant_id || ev.event_props?.sku || ev.event_props?.product_name;
-      const qty = parseFloat(ev.event_props?.quantity) || 1;
-      if (sku) { bkt.overall.skuSet.add(String(sku)); if (bkt[s]) bkt[s].skuSet.add(String(sku)); }
-      bkt.overall.qtySum += qty; bkt.overall.qtyCount++;
-      if (bkt[s]) { bkt[s].qtySum += qty; bkt[s].qtyCount++; }
-    }
+    // orders_count not in embedded customer — fetch from Customers API by ID
+    const custIds   = new Set(shopifyOrders.map(o => o.customer?.id).filter(Boolean));
+    const custOCMap = await fetchCustomerOrderCounts(custIds);
+    console.log(`[lifecycle ${fromD}-${toD}] Shopify customer OC map: ${custOCMap.size} customers fetched`);
 
-    for (const ev of chargedEvents) {
-      const s   = classifyLifecycleSegment(ev.profile, b2cChurnCutoff, b2bChurnCutoff);
-      const amt = parseFloat(ev.event_props?.Amount || ev.event_props?.amount || 0);
+    for (const order of shopifyOrders) {
+      const oc  = custOCMap.get(String(order.customer?.id)) ?? 1;
+      const s   = classifyShopifySegment(order, oc);
+      const amt = parseFloat(order.total_price) || 0;
       if (amt > 0) {
         bkt.overall.aovSum += amt; bkt.overall.aovCount++;
         if (bkt[s]) { bkt[s].aovSum += amt; bkt[s].aovCount++; }
+      }
+      for (const item of (order.line_items || [])) {
+        const sku = item.sku || item.title;
+        const qty = item.quantity || 1;
+        if (sku) { bkt.overall.skuSet.add(String(sku)); if (bkt[s]) bkt[s].skuSet.add(String(sku)); }
+        bkt.overall.qtySum += qty; bkt.overall.qtyCount++;
+        if (bkt[s]) { bkt[s].qtySum += qty; bkt[s].qtyCount++; }
       }
     }
 
@@ -859,7 +909,7 @@ app.get('/api/lifecycle-segments', async (req, res) => {
       return [s, {
         appOpen:    d.appOpen,
         uniqueSkus: d.skuSet.size,
-        avgQty:     d.qtyCount > 0 ? +(d.qtySum / d.qtyCount).toFixed(1) : null,
+        avgQty:     d.skuSet.size > 0 ? +(d.qtySum / d.skuSet.size).toFixed(1) : null,
         aov:        d.aovCount > 0 ? +(d.aovSum / d.aovCount).toFixed(2) : null,
       }];
     }));
