@@ -826,7 +826,7 @@
       const atcTh = `<th>${fmtDate(d)}</th>`;
       if (!skusOrdered) return atcTh;
       const tip = i === 0 && skuTipKey ? tipIcon(skuTipKey) : '';
-      return atcTh + `<th style="white-space:nowrap;background:#F5F3FF;color:#4338CA;font-size:11px">SKUs${tip}</th>`;
+      return atcTh + `<th style="white-space:nowrap;background:#F5F3FF;color:#4338CA">SKUs Ordered${tip}</th>`;
     }).join('');
     const thead = `<thead><tr><th>Category${catTip}</th>${dateCols}</tr></thead>`;
 
