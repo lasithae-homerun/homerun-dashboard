@@ -1180,6 +1180,75 @@ app.get('/api/debug-lc-profiles', async (req, res) => {
   }
 });
 
+// ── Hourly conversion funnel ──────────────────────────────────────────────────
+
+app.get('/api/hourly-conversion', async (req, res) => {
+  const { date } = req.query;
+  if (!date) return res.status(400).json({ success: false, error: 'date required (YYYY-MM-DD)' });
+
+  const dateD = parseInt(date.replace(/-/g, ''), 10);
+  try {
+    const [webSessions, webATC, pageBrowsed, appLaunched, appATC, screenLoaded, orderPlaced, shopifyOrders] = await Promise.all([
+      exportCTEvents('Web Session Started', dateD, dateD),
+      exportCTEvents('Added to Cart',       dateD, dateD),
+      exportCTEvents('Page Browsed',        dateD, dateD),
+      exportCTEvents('App Launched',        dateD, dateD),
+      exportCTEvents('Product Added',       dateD, dateD),
+      exportCTEvents('Screen Loaded',       dateD, dateD),
+      exportCTEvents('Order Placed',        dateD, dateD),
+      fetchOrdersInRange(date, date),
+    ]);
+
+    const getHour = ts => parseInt(String(ts).slice(8, 10), 10);
+
+    const countByHour = (events, filterFn) => {
+      const counts = new Array(24).fill(0);
+      for (const ev of events) {
+        if (filterFn && !filterFn(ev)) continue;
+        const h = getHour(ev.ts);
+        if (h >= 0 && h < 24) counts[h]++;
+      }
+      return counts;
+    };
+
+    const webSessionsH  = countByHour(webSessions);
+    const webATCH       = countByHour(webATC);
+    const cartPageH     = countByHour(pageBrowsed, ev => {
+      const title = (ev.event_props?.Title || ev.event_props?.title || '').toLowerCase();
+      const url   = (ev.event_props?.URL   || ev.event_props?.url   || '').toLowerCase();
+      return title.includes('shopping cart') || url.includes('/cart');
+    });
+    const appLaunchedH  = countByHour(appLaunched);
+    const appATCH       = countByHour(appATC);
+    const cartScreenH   = countByHour(screenLoaded, ev =>
+      (ev.event_props?.name || ev.event_props?.Name || '') === 'Cart'
+    );
+    const appOrdersH    = countByHour(orderPlaced);
+
+    const webOrdersH = new Array(24).fill(0);
+    for (const o of shopifyOrders) {
+      if (o.source_name === APP_SOURCE) continue;
+      const ist = new Date(new Date(o.created_at).getTime() + 5.5 * 60 * 60 * 1000);
+      const h   = ist.getUTCHours();
+      if (h >= 0 && h < 24) webOrdersH[h]++;
+    }
+
+    const web = Array.from({ length: 24 }, (_, h) => ({
+      hour: h, sessions: webSessionsH[h], productAdded: webATCH[h],
+      cartPage: cartPageH[h], orders: webOrdersH[h],
+    }));
+    const app = Array.from({ length: 24 }, (_, h) => ({
+      hour: h, launched: appLaunchedH[h], productAdded: appATCH[h],
+      cartScreen: cartScreenH[h], orders: appOrdersH[h],
+    }));
+
+    res.json({ success: true, date, web, app });
+  } catch (err) {
+    console.error('[/api/hourly-conversion]', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // ── Static + start ────────────────────────────────────────────────────────────
 
 app.use(express.static(path.join(__dirname, 'public')));
