@@ -442,8 +442,6 @@
       white-space: pre-line; box-shadow: 0 4px 16px rgba(0,0,0,.25);
     }
   </style>
-  <!-- SheetJS for client-side Excel export -->
-  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 
@@ -459,7 +457,6 @@
     <div class="refresh-info" id="refreshInfo">
       <span>–</span>
     </div>
-    <button class="btn btn-outline" id="exportBtn" onclick="exportToExcel()" disabled>Export to Excel</button>
     <button class="btn btn-primary" id="refreshBtn" onclick="loadMetrics()">Refresh</button>
   </div>
 </div>
@@ -709,10 +706,6 @@
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
     document.getElementById('tab-' + tab).classList.add('active');
     document.getElementById('panel-' + tab).classList.add('active');
-    const exportBtn = document.getElementById('exportBtn');
-    if (tab === 'conversion') exportBtn.disabled = !lastConvData;
-    else if (tab === 'atc')   exportBtn.disabled = !lastProductData;
-    else                      exportBtn.disabled = !lastData;
   }
 
   function fmtDate(iso) {
@@ -794,8 +787,6 @@
     document.getElementById('refreshInfo').innerHTML =
       `<strong>Last refreshed</strong> ${timeStr}${data.cached ? ' · cached' : ''}`;
 
-    document.getElementById('exportBtn').disabled = false;
-    document.getElementById('exportBtn').textContent = 'Export to Excel';
   }
 
   async function loadMetrics() {
@@ -818,114 +809,6 @@
       btn.innerHTML = 'Refresh';
       btn.disabled = false;
     }
-  }
-
-  function exportToExcel() {
-    if (activeTab === 'conversion')    exportConversionTab();
-    else if (activeTab === 'atc')      exportATCTab();
-    else if (activeTab === 'usersegs') exportUserSegsTab();
-    else if (activeTab === 'lifecycle') exportLifecycleTab();
-    else                               exportOrdersTab();
-  }
-
-  function exportATCTab() {
-    if (!lastProductData) return;
-    const { app, web, categories, appSkusOrdered, webSkusOrdered } = lastProductData;
-    const wb = XLSX.utils.book_new();
-
-    const makeSheet = (rows, skusOrdered) => {
-      const dates  = rows.map(r => r.date);
-      const header = ['Category', ...dates.flatMap(d => [fmtDate(d), fmtDate(d) + ' SKUs'])];
-      const dataRows = categories.map(cat => {
-        const vals = dates.flatMap(d => {
-          const row = rows.find(r => r.date === d);
-          return [(row && row[cat]) || 0, (skusOrdered?.[d]?.[cat]) || 0];
-        });
-        return [cat, ...vals];
-      });
-      const totalsRow = ['Total', ...dates.flatMap(d => {
-        const row = rows.find(r => r.date === d);
-        const atcTotal = categories.reduce((s, cat) => s + ((row && row[cat]) || 0), 0);
-        const skuTotal = categories.reduce((s, cat) => s + (skusOrdered?.[d]?.[cat] || 0), 0);
-        return [atcTotal, skuTotal];
-      })];
-      const ws = XLSX.utils.aoa_to_sheet([header, ...dataRows, totalsRow]);
-      ws['!cols'] = [{ wch: 24 }, ...dates.flatMap(() => [{ wch: 12 }, { wch: 10 }])];
-      return ws;
-    };
-
-    XLSX.utils.book_append_sheet(wb, makeSheet(app, appSkusOrdered), 'App - Added to Cart');
-    XLSX.utils.book_append_sheet(wb, makeSheet(web, webSkusOrdered), 'Web - Added to Cart');
-    const from = (document.getElementById('atcFrom').value || 'export').slice(0, 10);
-    XLSX.writeFile(wb, `homerun_added_to_cart_${from}.xlsx`);
-  }
-
-  function exportConversionTab() {
-    if (!lastConvData || !lastConvData.length) return;
-    const wb = XLSX.utils.book_new();
-
-    const webRows = [['Date', 'Web Sessions', 'Product Added', 'Cart Page', 'Orders (Web)', 'CVR%']];
-    for (const d of lastConvData) {
-      const f = d.web;
-      const cvr = f.sessions ? (f.orders / f.sessions * 100).toFixed(1) + '%' : '—';
-      webRows.push([fmtDate(d.date), f.sessions ?? '—', f.productAdded ?? '—', f.cartPage ?? '—', f.orders ?? '—', cvr]);
-    }
-    const wsWeb = XLSX.utils.aoa_to_sheet(webRows);
-    wsWeb['!cols'] = [{ wch: 12 }, { wch: 16 }, { wch: 16 }, { wch: 14 }, { wch: 16 }, { wch: 10 }];
-    XLSX.utils.book_append_sheet(wb, wsWeb, 'Web Funnel');
-
-    const appRows = [['Date', 'App Launched', 'Product Added', 'Cart Screen', 'Orders (App)', 'CVR%']];
-    for (const d of lastConvData) {
-      const f = d.app;
-      const cvr = f.launched ? (f.orders / f.launched * 100).toFixed(1) + '%' : '—';
-      appRows.push([fmtDate(d.date), f.launched ?? '—', f.productAdded ?? '—', f.cartScreen ?? '—', f.orders ?? '—', cvr]);
-    }
-    const wsApp = XLSX.utils.aoa_to_sheet(appRows);
-    wsApp['!cols'] = [{ wch: 12 }, { wch: 16 }, { wch: 16 }, { wch: 14 }, { wch: 16 }, { wch: 10 }];
-    XLSX.utils.book_append_sheet(wb, wsApp, 'App Funnel');
-
-    const from = (document.getElementById('convFrom').value || 'export').slice(0, 10);
-    XLSX.writeFile(wb, `homerun_conversion_${from}.xlsx`);
-  }
-
-  function exportOrdersTab() {
-    if (!lastData) return;
-    const m = lastData.metrics;
-    const d = lastData.dates;
-
-    const ROWS = [
-      ['ORDERS OVERVIEW', null],
-      ['Total Orders',              'totalOrders'],
-      ['New Customer Orders',       'newCustomerOrders'],
-      ['Returning Customer Orders', 'returningCustomerOrders'],
-      ['', null],
-      ['BULK ORDERS', null],
-      ['Total Bulk Orders', 'totalBulkOrders'],
-      ['First-Time Bulk',   'firstTimeBulk'],
-      ['Repeat Bulk',       'repeatBulk'],
-      ['B2B Bulk',          'b2bBulk'],
-      ['B2C Bulk',          'b2cBulk'],
-      ['', null],
-      ['CUSTOMER SEGMENTS', null],
-      ['B2B Orders',                'b2bOrders'],
-      ['B2C Orders',                'b2cOrders'],
-      ['B2B New Customers Ordered', 'b2bNewCustomers'],
-      ['B2C New Customers Ordered', 'b2cNewCustomers'],
-    ];
-
-    const fmt = (period, key) => `${period.total[key]} (${period.app[key]} app, ${period.web[key]} web)`;
-    const sheetData = [
-      ['Metric', `Yesterday (${fmtDate(d.d1)})`, `Day Before (${fmtDate(d.d2)})`, `Last Week (${fmtDate(d.d7)})`],
-    ];
-    for (const [label, key] of ROWS) {
-      sheetData.push(key ? [label, fmt(m.d1, key), fmt(m.d2, key), fmt(m.d7, key)] : [label, '', '', '']);
-    }
-
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet(sheetData);
-    ws['!cols'] = [{ wch: 30 }, { wch: 26 }, { wch: 26 }, { wch: 26 }];
-    XLSX.utils.book_append_sheet(wb, ws, 'Orders Segment');
-    XLSX.writeFile(wb, `homerun_orders_${d.d1}.xlsx`);
   }
 
   function renderProductPivot(wrapperId, rows, categories, skusOrdered, catTipKey, skuTipKey) {
@@ -1020,7 +903,7 @@
       const pj  = await res.json();
       if (!pj.success) throw new Error(pj.error);
       lastProductData = pj;
-      document.getElementById('exportBtn').disabled = false;
+
       renderProductPivot('appProductsWrapper', pj.app, pj.categories, pj.appSkusOrdered, 'atcAppCat', 'atcAppSkus');
       renderProductPivot('webProductsWrapper', pj.web, pj.categories, pj.webSkusOrdered, 'atcWebCat', 'atcWebSkus');
     } catch (e) {
@@ -1122,7 +1005,7 @@
       if (!json.success) throw new Error(json.error);
 
       lastUserSegsData = json;
-      document.getElementById('exportBtn').disabled = false;
+
       renderUserSegsTable('activeSegsWrapper',  json.active);
       renderUserSegsTable('churnedSegsWrapper', json.churned);
     } catch (e) {
@@ -1133,29 +1016,6 @@
       btn.innerHTML = 'Load';
       btn.disabled  = false;
     }
-  }
-
-  function exportUserSegsTab() {
-    if (!lastUserSegsData) return;
-    const { active, churned } = lastUserSegsData;
-    const OC_LABELS = ['OC=0', 'OC=1', 'OC=2', 'OC=3', 'OC=4', 'OC=5+'];
-
-    const makeSheet = (rows) => {
-      const header = ['Order Count', 'App Launched', 'ATC', 'Order Placed'];
-      const data   = OC_LABELS.map(label => {
-        const r = rows.find(x => x.oc === label) || {};
-        return [label, r.appLaunched ?? '', r.atc ?? '', r.orderPlaced ?? ''];
-      });
-      const ws = XLSX.utils.aoa_to_sheet([header, ...data]);
-      ws['!cols'] = [{ wch: 14 }, { wch: 16 }, { wch: 14 }, { wch: 16 }];
-      return ws;
-    };
-
-    const wb   = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, makeSheet(active),  'Active Users');
-    XLSX.utils.book_append_sheet(wb, makeSheet(churned), 'Churned Users');
-    const from = (document.getElementById('usegsFrom').value || 'export').slice(0, 10);
-    XLSX.writeFile(wb, `homerun_user_segments_${from}.xlsx`);
   }
 
   // ── Lifecycle Segments ──────────────────────────────────────────────────────
@@ -1195,36 +1055,6 @@
     }).join('');
   }
 
-  function exportLifecycleTab() {
-    if (!lastLifecycleData) return;
-    const { conversion, basket } = lastLifecycleData;
-    const wb = XLSX.utils.book_new();
-
-    const makeSheet = (data, cols) => {
-      const header = ['Channel', 'User Type', 'Definition', ...cols.map(c => c.label)];
-      const rows   = LC_SEGS.map(seg => {
-        const d = data[seg.key] || {};
-        return [seg.channel || 'All', seg.label, seg.def, ...cols.map(c => d[c.key] ?? '')];
-      });
-      const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
-      ws['!cols'] = [{ wch:18 }, { wch:24 }, ...cols.map(() => ({ wch:14 }))];
-      return ws;
-    };
-
-    XLSX.utils.book_append_sheet(wb, makeSheet(conversion, [
-      { key:'appOpen', label:'App Open' }, { key:'search', label:'Search' },
-      { key:'atc', label:'Add to Cart' }, { key:'orderPlaced', label:'Order Placed' },
-    ]), 'Conversion Funnel');
-
-    XLSX.utils.book_append_sheet(wb, makeSheet(basket, [
-      { key:'appOpen', label:'App Open' }, { key:'uniqueSkus', label:'Unique SKUs' },
-      { key:'avgQty', label:'Qty/SKU' },   { key:'aov', label:'AOV (Rs)' },
-    ]), 'Basket Analysis');
-
-    const from = (document.getElementById('lcFrom').value || 'export').slice(0, 10);
-    XLSX.writeFile(wb, `homerun_lifecycle_${from}.xlsx`);
-  }
-
   async function loadConversion() {
     const from = document.getElementById('convFrom').value;
     const to   = document.getElementById('convTo').value;
@@ -1259,7 +1089,7 @@
       .then(json => {
         if (!json.success) throw new Error(json.error);
         lastConvData = json.data;
-        document.getElementById('exportBtn').disabled = false;
+  
         document.getElementById('webConvWrapper').innerHTML = buildFunnelTable(json.data, 'web', webSteps);
         document.getElementById('appConvWrapper').innerHTML = buildFunnelTable(json.data, 'app', appSteps);
       })
