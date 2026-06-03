@@ -462,7 +462,7 @@ app.get('/api/conversion', async (req, res) => {
 
   const todayStr      = istDate(0);
   const rangeHasToday = getDatesInRange(from, to).includes(todayStr);
-  const cacheKey      = `${from}_${to}`;
+  const cacheKey      = `conv_v2_${from}_${to}`;
 
   if (!rangeHasToday && convCache[cacheKey] && Date.now() - convCache[cacheKey].ts < CONV_TTL) {
     return res.json({ success: true, data: convCache[cacheKey].data, cached: true });
@@ -470,22 +470,34 @@ app.get('/api/conversion', async (req, res) => {
 
   try {
     const dates = getDatesInRange(from, to);
-    const data  = [];
 
+    // Fetch Shopify orders for the whole range once, split by date+channel
+    const shopifyOrders = await fetchOrdersInRange(from.slice(0, 10), to.slice(0, 10));
+    const shopifyByDate = {};
+    for (const o of shopifyOrders) {
+      const ist = new Date(new Date(o.created_at).getTime() + 5.5 * 60 * 60 * 1000);
+      const d   = ist.toISOString().slice(0, 10);
+      if (!shopifyByDate[d]) shopifyByDate[d] = { web: 0, app: 0 };
+      if (o.source_name === APP_SOURCE) shopifyByDate[d].app++;
+      else shopifyByDate[d].web++;
+    }
+
+    const data  = [];
     for (const dateStr of dates) {
       const [
-        webSessions, webProductAdded, cartPage,   webOrders,
+        webSessions, webProductAdded, cartPage,
         appLaunched, appProductAdded, cartScreen, appOrders,
       ] = await Promise.all([
         fetchCTCount('Web Session Started', null, dateStr),
-        fetchCTCount('Added to Cart',       null, dateStr),   // web ATC event
-        fetchCTCount('Page Browsed',   [{ name: 'Title',     operator: 'equals', value: 'Your Shopping Cart' }], dateStr),
-        fetchCTCount('Order Created',  [{ name: 'CT Source', operator: 'equals', value: 'Web' }],               dateStr),
+        fetchCTCount('Added to Cart',       null, dateStr),
+        fetchCTCount('Page Browsed',   [{ name: 'Title', operator: 'equals', value: 'Your Shopping Cart' }], dateStr),
         fetchCTCount('App Launched',   null, dateStr),
-        fetchCTCount('Product Added',  null, dateStr),        // app ATC event
-        fetchCTCount('Screen Loaded',  [{ name: 'name',      operator: 'equals', value: 'Cart' }],              dateStr),
+        fetchCTCount('Product Added',  null, dateStr),
+        fetchCTCount('Screen Loaded',  [{ name: 'name',  operator: 'equals', value: 'Cart' }],              dateStr),
         fetchCTCount('Order Placed',   null, dateStr),
       ]);
+
+      const webOrders = shopifyByDate[dateStr]?.web ?? 0;
 
       data.push({
         date: dateStr,
