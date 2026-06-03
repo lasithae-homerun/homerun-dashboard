@@ -75,7 +75,7 @@ async function fetchOrdersForDate(dateStr) {
 async function fetchOrdersInRange(fromDate, toDate) {
   const min = encodeURIComponent(`${fromDate}T00:00:00+05:30`);
   const max = encodeURIComponent(`${toDate}T23:59:59+05:30`);
-  let urlPath = `/admin/api/2024-01/orders.json?status=any&created_at_min=${min}&created_at_max=${max}&limit=250&fields=id,source_name,line_items`;
+  let urlPath = `/admin/api/2024-01/orders.json?status=any&created_at_min=${min}&created_at_max=${max}&limit=250&fields=id,created_at,source_name,line_items`;
   const orders = [];
   while (urlPath) {
     const { body, link } = await shopifyGet(urlPath);
@@ -508,7 +508,7 @@ app.get('/api/app-products', async (req, res) => {
   const { from, to } = req.query;
   if (!from || !to) return res.status(400).json({ success: false, error: 'from and to required' });
 
-  const cacheKey = `v17_${from.slice(0, 10)}_${to.slice(0, 10)}`;
+  const cacheKey = `v18_${from.slice(0, 10)}_${to.slice(0, 10)}`;
   const cached   = appProductsCache[cacheKey];
   if (cached && Date.now() - cached.ts < APP_PROD_TTL) {
     return res.json({ success: true, app: cached.app, web: cached.web, categories: cached.categories, appSkusOrdered: cached.appSkusOrdered, webSkusOrdered: cached.webSkusOrdered, cached: true });
@@ -579,10 +579,16 @@ app.get('/api/app-products', async (req, res) => {
     const categories = Object.keys(totals).filter(k => k !== 'Other').sort((a, b) => totals[b] - totals[a]);
     if (totals['Other']) categories.push('Other');
 
-    // Unique SKUs ordered per collection, split by sales channel (app vs web)
-    const appSkuSets = {}, webSkuSets = {};
+    // Unique SKUs ordered per collection per date, split by sales channel (app vs web)
+    const appSkuSetsByDate = {}, webSkuSetsByDate = {};
+    for (const d of dates) { appSkuSetsByDate[d] = {}; webSkuSetsByDate[d] = {}; }
+
     for (const order of orders) {
-      const sets = order.source_name === APP_SOURCE ? appSkuSets : webSkuSets;
+      const raw = new Date(order.created_at);
+      const ist = new Date(raw.getTime() + 5.5 * 60 * 60 * 1000);
+      const orderDate = ist.toISOString().slice(0, 10);
+      if (!appSkuSetsByDate[orderDate]) continue;
+      const sets = order.source_name === APP_SOURCE ? appSkuSetsByDate[orderDate] : webSkuSetsByDate[orderDate];
       for (const item of order.line_items || []) {
         const pid = String(item.product_id || '');
         const vid = String(item.variant_id || '');
@@ -595,8 +601,12 @@ app.get('/api/app-products', async (req, res) => {
       }
     }
     const appSkusOrdered = {}, webSkusOrdered = {};
-    for (const [cat, s] of Object.entries(appSkuSets)) appSkusOrdered[cat] = s.size;
-    for (const [cat, s] of Object.entries(webSkuSets)) webSkusOrdered[cat] = s.size;
+    for (const d of dates) {
+      appSkusOrdered[d] = {};
+      for (const [cat, s] of Object.entries(appSkuSetsByDate[d])) appSkusOrdered[d][cat] = s.size;
+      webSkusOrdered[d] = {};
+      for (const [cat, s] of Object.entries(webSkuSetsByDate[d])) webSkusOrdered[d][cat] = s.size;
+    }
 
     appProductsCache[cacheKey] = { app: appRows, web: webRows, categories, appSkusOrdered, webSkusOrdered, ts: Date.now() };
     res.json({ success: true, app: appRows, web: webRows, categories, appSkusOrdered, webSkusOrdered });
